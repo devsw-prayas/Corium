@@ -4,7 +4,7 @@
 #include "ThreadUtils.h"
 
 namespace Corium::Core::Factory {
-	class CORIUM_ALIGNAS(8) CORIUM_RUNTIME_API AThreadFactory {
+	class CORIUM_RUNTIME_API AThreadFactory {
 	public:
 		AThreadFactory();
 		CORIUM_NODISCARD virtual ThreadHandle createAndStart(

@@ -32,42 +32,42 @@ namespace Corium::Cuda::Utils {
 		CONCURRENT_MANAGED_ACCESS               // GPU can access managed memory concurrently with CPU (0/1); false on Windows WDDM
 	};
 
-	enum class CORIUM_RUNTIME_API ContextSchedulingFlags final : uint8_t {
+	enum class CORIUM_RUNTIME_API ContextSchedulingFlags : uint8_t {
 		SCHEDULE_AUTO,
 		SCHEDULE_SPIN,
 		SCHEDULE_YIELD,
 		SCHEDULE_BLOCKING_SYNC
 	};
 
-	enum class CORIUM_RUNTIME_API ContextCreationFlags final : uint8_t {
+	enum class CORIUM_RUNTIME_API ContextCreationFlags : uint8_t {
 		NONE,
 		MAP_HOST,
 		LMEM_RESIZE_TO_MAX
 	};
 
-	enum class CORIUM_RUNTIME_API HostAllocFlags final : uint8_t {
+	enum class CORIUM_RUNTIME_API HostAllocFlags : uint8_t {
 		ALLOC_PORTABLE,
 		ALLOC_DEVICE_MAP,
 		ALLOC_WRITE_COMBINED
 	};
 
-	enum class CORIUM_RUNTIME_API HostRegisterFlags final : uint8_t {
+	enum class CORIUM_RUNTIME_API HostRegisterFlags : uint8_t {
 		REG_PORTABLE,
 		REG_DEVICE_MAP,
 		REG_IO_MEMORY,
 		REG_READ_ONLY
 	};
 
-	enum class DeviceLocation final : uint8_t {
+	enum class DeviceLocation : uint8_t {
 		CPU, GPU
 	};
 
-	enum class CORIUM_RUNTIME_API AllocationType final : uint8_t {
+	enum class CORIUM_RUNTIME_API AllocationType : uint8_t {
 		INVALID,
 		PINNED,
 	};
 
-	enum class CORIUM_RUNTIME_API AllocationHandleType final : uint8_t {
+	enum class CORIUM_RUNTIME_API AllocationHandleType : uint8_t {
 		NONE,
 		WIN32_HANDLE,
 		FABRIC_HANDLE
@@ -79,17 +79,17 @@ namespace Corium::Cuda::Utils {
 		READWRITE = 1 << 1
 	};
 
-	enum class CORIUM_RUNTIME_API AllocationGranularityOption final : uint8_t {
+	enum class CORIUM_RUNTIME_API AllocationGranularityOption : uint8_t {
 		MINIMUM,
 		RECOMMENDED
 	};
 
-	enum class CORIUM_RUNTIME_API StreamFlags final : uint8_t {
+	enum class CORIUM_RUNTIME_API StreamFlags : uint8_t {
 		DEFAULT,
 		NON_BLOCKING
 	};
 
-	enum class CORIUM_RUNTIME_API EventFlags final : uint8_t {
+	enum class CORIUM_RUNTIME_API EventFlags : uint8_t {
 		DEFAULT        = 0,
 		BLOCKING_SYNC  = 1 << 0,
 		DISABLE_TIMING = 1 << 1,
@@ -108,7 +108,7 @@ namespace Corium::Cuda::Utils {
 		INVALIDATED
 	};
 
-	enum class CORIUM_RUNTIME_API CopyMemoryType final : uint8_t {
+	enum class CORIUM_RUNTIME_API CopyMemoryType : uint8_t {
 		HOST,
 		DEVICE,
 		ARRAY
