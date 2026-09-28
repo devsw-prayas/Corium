@@ -43,7 +43,7 @@ namespace Corium::Memory::Allocators {
 		{ d.deallocateImpl() } -> std::same_as<void>;
 	};
 
-	enum class CORIUM_RUNTIME_API MemOrigin : std::uint8_t {
+	enum class MemOrigin : std::uint8_t {
 		PagedVirtual
 	};
 
@@ -99,7 +99,7 @@ namespace Corium::Memory::Allocators {
 	// policies (e.g. GeneralAllocator). Not part of IAllocator's public surface.
 	// ------------------------------------------------------------------------
 
-	enum class CORIUM_RUNTIME_API AllocationTrait : std::uint8_t {
+	enum class AllocationTrait : std::uint8_t {
 		Scratch,
 		Task,
 		Executor,
@@ -162,7 +162,7 @@ namespace Corium::Memory::Allocators {
 		{ d.allocateImpl(n) } -> std::same_as<T*>;
 	};
 
-	enum class CORIUM_RUNTIME_API MemType : std::uint8_t {
+	enum class MemType : std::uint8_t {
 		Raw,
 		Typed
 	};

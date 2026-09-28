@@ -43,7 +43,7 @@ namespace Corium::Execution {
 
 	// TaskPriority
 
-	enum class CORIUM_RUNTIME_API TaskPriority : uint8_t {
+	enum class TaskPriority : uint8_t {
 		Low = 0,
 		Normal = 1,
 		High = 2,
@@ -52,7 +52,7 @@ namespace Corium::Execution {
 
 	// TaskState
 
-	enum class CORIUM_RUNTIME_API TaskState : uint8_t {
+	enum class TaskState : uint8_t {
 		Pending = 0,
 		Running = 1,
 		Completed = 2,

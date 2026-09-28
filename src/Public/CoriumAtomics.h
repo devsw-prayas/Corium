@@ -2,7 +2,7 @@
 #include "PlatIntrin.h"
 
 namespace Corium::Core::Atomics {
-	enum class CORIUM_RUNTIME_API MemoryOrder : std::uint8_t {
+	enum class MemoryOrder : std::uint8_t {
 		RELAXED = CORIUM_MEMORY_ORDER_RELAXED,
 		CONSUME = CORIUM_MEMORY_ORDER_CONSUME,
 		ACQUIRE = CORIUM_MEMORY_ORDER_ACQUIRE,
@@ -30,23 +30,24 @@ namespace Corium::Core::Atomics {
 	}
 
 	template<typename T, typename Valid = Intrinsic::ValidAtomicParameter<T>::Type>
-	CORIUM_NODISCARD_MSG("Cannot discard an atomic store") CORIUM_FORCEINLINE
+	CORIUM_FORCEINLINE
 		void atomicStore(Valid* p_Memory, T v_Value, MemoryOrder v_Ordering) {
 		switch (v_Ordering) {
 		case MemoryOrder::RELAXED:
 			AtomicStore_Relaxed(p_Memory, v_Value);
-			break;
+			return;
 		case MemoryOrder::SEQ_CST:
 			AtomicStore_SeqCst(p_Memory, v_Value);
-			break;
+			return;
 		case MemoryOrder::RELEASE:
 			AtomicStore_Release(p_Memory, v_Value);
-			break;
-		case MemoryOrder::ACQ_REL: 
-		case MemoryOrder::ACQUIRE: 
-		case MemoryOrder::CONSUME: CORIUM_UNREACHABLE();
+			return;
+		case MemoryOrder::ACQ_REL:
+		case MemoryOrder::ACQUIRE:
+		case MemoryOrder::CONSUME:
+			CORIUM_ASSERT(false && "invalid memory order for atomic store");
+			CORIUM_UNREACHABLE();
 		}
-		CORIUM_UNREACHABLE();
 	}
 
 	template<typename T, typename Valid = Intrinsic::ValidAtomicParameter<T>::Type>
@@ -107,22 +108,26 @@ namespace Corium::Core::Atomics {
 			case MemoryOrder::SEQ_CST:
 				return AtomicCompareExchange32_Relaxed_SeqCst(reinterpret_cast<volatile long*>(p_Memory), v_Expected, v_Desired, false);
 
-			case MemoryOrder::RELEASE: 
-			case MemoryOrder::ACQ_REL: 
+			case MemoryOrder::RELEASE:
+			case MemoryOrder::ACQ_REL:
 			case MemoryOrder::CONSUME:
-				CORIUM_UNREACHABLE();
+				break;
 			}
+			CORIUM_ASSERT(false && "invalid failure memory order for atomic compare exchange");
+			CORIUM_UNREACHABLE();
 
 		case MemoryOrder::ACQUIRE:
 			switch (v_OrderingFailure) {
 			case MemoryOrder::RELAXED: return AtomicCompareExchange32_Acquire_Relaxed(reinterpret_cast<volatile long*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::ACQUIRE: return AtomicCompareExchange32_Acquire_Acquire(reinterpret_cast<volatile long*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::SEQ_CST: return AtomicCompareExchange32_Acquire_SeqCst(reinterpret_cast<volatile long*>(p_Memory), v_Expected, v_Desired, false);
-			case MemoryOrder::RELEASE: 
-			case MemoryOrder::ACQ_REL: 
+			case MemoryOrder::RELEASE:
+			case MemoryOrder::ACQ_REL:
 			case MemoryOrder::CONSUME:
-				CORIUM_UNREACHABLE();
+				break;
 			}
+			CORIUM_ASSERT(false && "invalid failure memory order for atomic compare exchange");
+			CORIUM_UNREACHABLE();
 
 		case MemoryOrder::RELEASE:
 			switch (v_OrderingFailure) {
@@ -135,35 +140,42 @@ namespace Corium::Core::Atomics {
 			case MemoryOrder::SEQ_CST:
 				return AtomicCompareExchange32_Release_SeqCst(reinterpret_cast<volatile long*>(p_Memory), v_Expected, v_Desired, false);
 
-			case MemoryOrder::RELEASE: 
-			case MemoryOrder::ACQ_REL: 
+			case MemoryOrder::RELEASE:
+			case MemoryOrder::ACQ_REL:
 			case MemoryOrder::CONSUME:
-				CORIUM_UNREACHABLE();
+				break;
 			}
+			CORIUM_ASSERT(false && "invalid failure memory order for atomic compare exchange");
+			CORIUM_UNREACHABLE();
 
 		case MemoryOrder::ACQ_REL:
 			switch (v_OrderingFailure) {
 			case MemoryOrder::RELAXED: return AtomicCompareExchange32_AcqRel_Relaxed(reinterpret_cast<volatile long*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::ACQUIRE: return AtomicCompareExchange32_AcqRel_Acquire(reinterpret_cast<volatile long*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::SEQ_CST: return AtomicCompareExchange32_AcqRel_SeqCst(reinterpret_cast<volatile long*>(p_Memory), v_Expected, v_Desired, false);
-			case MemoryOrder::RELEASE: 
-			case MemoryOrder::ACQ_REL: 
+			case MemoryOrder::RELEASE:
+			case MemoryOrder::ACQ_REL:
 			case MemoryOrder::CONSUME:
-				CORIUM_UNREACHABLE();
+				break;
 			}
+			CORIUM_ASSERT(false && "invalid failure memory order for atomic compare exchange");
+			CORIUM_UNREACHABLE();
 
 		case MemoryOrder::SEQ_CST:
 			switch (v_OrderingFailure) {
 			case MemoryOrder::RELAXED: return AtomicCompareExchange32_SeqCst_Relaxed(reinterpret_cast<volatile long*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::ACQUIRE: return AtomicCompareExchange32_SeqCst_Acquire(reinterpret_cast<volatile long*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::SEQ_CST: return AtomicCompareExchange32_SeqCst_SeqCst(reinterpret_cast<volatile long*>(p_Memory), v_Expected, v_Desired, false);
-			case MemoryOrder::RELEASE: 
-			case MemoryOrder::ACQ_REL: 
+			case MemoryOrder::RELEASE:
+			case MemoryOrder::ACQ_REL:
 			case MemoryOrder::CONSUME:
-				CORIUM_UNREACHABLE();
+				break;
 			}
+			CORIUM_ASSERT(false && "invalid failure memory order for atomic compare exchange");
+			CORIUM_UNREACHABLE();
 
 		case MemoryOrder::CONSUME:
+			CORIUM_ASSERT(false && "invalid success memory order for atomic compare exchange");
 			CORIUM_UNREACHABLE();
 		}
 
@@ -185,11 +197,13 @@ namespace Corium::Core::Atomics {
 			case MemoryOrder::RELAXED: return AtomicCompareExchange64_Relaxed_Relaxed(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::ACQUIRE: return AtomicCompareExchange64_Relaxed_Acquire(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::SEQ_CST: return AtomicCompareExchange64_Relaxed_SeqCst(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
-			case MemoryOrder::RELEASE: 
-			case MemoryOrder::ACQ_REL: 
+			case MemoryOrder::RELEASE:
+			case MemoryOrder::ACQ_REL:
 			case MemoryOrder::CONSUME:
-				CORIUM_UNREACHABLE();
+				break;
 			}
+			CORIUM_ASSERT(false && "invalid failure memory order for atomic compare exchange");
+			CORIUM_UNREACHABLE();
 
 			// ---------------- ACQUIRE ----------------
 		case MemoryOrder::ACQUIRE:
@@ -197,11 +211,13 @@ namespace Corium::Core::Atomics {
 			case MemoryOrder::RELAXED: return AtomicCompareExchange64_Acquire_Relaxed(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::ACQUIRE: return AtomicCompareExchange64_Acquire_Acquire(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::SEQ_CST: return AtomicCompareExchange64_Acquire_SeqCst(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
-			case MemoryOrder::RELEASE: 
+			case MemoryOrder::RELEASE:
 			case MemoryOrder::ACQ_REL:
 			case MemoryOrder::CONSUME:
-				CORIUM_UNREACHABLE();
+				break;
 			}
+			CORIUM_ASSERT(false && "invalid failure memory order for atomic compare exchange");
+			CORIUM_UNREACHABLE();
 
 			// ---------------- RELEASE ----------------
 		case MemoryOrder::RELEASE:
@@ -209,11 +225,13 @@ namespace Corium::Core::Atomics {
 			case MemoryOrder::RELAXED: return AtomicCompareExchange64_Release_Relaxed(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::ACQUIRE: return AtomicCompareExchange64_Release_Acquire(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::SEQ_CST: return AtomicCompareExchange64_Release_SeqCst(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
-			case MemoryOrder::RELEASE: 
-			case MemoryOrder::ACQ_REL: 
+			case MemoryOrder::RELEASE:
+			case MemoryOrder::ACQ_REL:
 			case MemoryOrder::CONSUME:
-				CORIUM_UNREACHABLE();
+				break;
 			}
+			CORIUM_ASSERT(false && "invalid failure memory order for atomic compare exchange");
+			CORIUM_UNREACHABLE();
 
 			// ---------------- ACQ_REL ----------------
 		case MemoryOrder::ACQ_REL:
@@ -221,11 +239,13 @@ namespace Corium::Core::Atomics {
 			case MemoryOrder::RELAXED: return AtomicCompareExchange64_AcqRel_Relaxed(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::ACQUIRE: return AtomicCompareExchange64_AcqRel_Acquire(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::SEQ_CST: return AtomicCompareExchange64_AcqRel_SeqCst(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
-			case MemoryOrder::RELEASE: 
-			case MemoryOrder::ACQ_REL: 
+			case MemoryOrder::RELEASE:
+			case MemoryOrder::ACQ_REL:
 			case MemoryOrder::CONSUME:
-				CORIUM_UNREACHABLE();
+				break;
 			}
+			CORIUM_ASSERT(false && "invalid failure memory order for atomic compare exchange");
+			CORIUM_UNREACHABLE();
 
 			// ---------------- SEQ_CST ----------------
 		case MemoryOrder::SEQ_CST:
@@ -233,13 +253,16 @@ namespace Corium::Core::Atomics {
 			case MemoryOrder::RELAXED:return AtomicCompareExchange64_SeqCst_Relaxed(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::ACQUIRE: return AtomicCompareExchange64_SeqCst_Acquire(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
 			case MemoryOrder::SEQ_CST: return AtomicCompareExchange64_SeqCst_SeqCst(reinterpret_cast<volatile __int64*>(p_Memory), v_Expected, v_Desired, false);
-			case MemoryOrder::RELEASE: 
-			case MemoryOrder::ACQ_REL: 
+			case MemoryOrder::RELEASE:
+			case MemoryOrder::ACQ_REL:
 			case MemoryOrder::CONSUME:
-				CORIUM_UNREACHABLE();
+				break;
 			}
+			CORIUM_ASSERT(false && "invalid failure memory order for atomic compare exchange");
+			CORIUM_UNREACHABLE();
 
 		case MemoryOrder::CONSUME:
+			CORIUM_ASSERT(false && "invalid success memory order for atomic compare exchange");
 			CORIUM_UNREACHABLE();
 		}
 

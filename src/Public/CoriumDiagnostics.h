@@ -30,19 +30,23 @@
 #define CORIUM_BUILD_RELEASE 1
 #endif
 
+// Asserts on a constant (e.g. `false && "msg"`) are intentional; MSVC flags them as C4127
+// when instantiated inside templates.
+#if CORIUM_COMPILER_MSVC
+#define CORIUM_CONSTANT_CONDITION_BEGIN CORIUM_PRAGMA(warning(push)) CORIUM_PRAGMA(warning(disable : 4127))
+#define CORIUM_CONSTANT_CONDITION_END   CORIUM_PRAGMA(warning(pop))
+#else
+#define CORIUM_CONSTANT_CONDITION_BEGIN
+#define CORIUM_CONSTANT_CONDITION_END
+#endif
+
 #if CORIUM_BUILD_DEBUG
 
-#define CORIUM_ASSERT(expr)                                     \
-        do {                                                   \
-            if (!(expr)) {                                    \
-                CORIUM_DEBUG_BREAK();                              \
-                CORIUM_TRAP();                                     \
-            }                                                  \
-        } while (0)
+#define CORIUM_ASSERT(expr)                                             CORIUM_CONSTANT_CONDITION_BEGIN                                do {                                                               if (!(expr)) {                                                    CORIUM_DEBUG_BREAK();                                              CORIUM_TRAP();                                                 }                                                          } while (0)                                                    CORIUM_CONSTANT_CONDITION_END
 
 #else
 
-#define CORIUM_ASSERT(expr) do { (void)sizeof(expr); } while (0)
+#define CORIUM_ASSERT(expr) CORIUM_CONSTANT_CONDITION_BEGIN do { (void)sizeof(expr); } while (0) CORIUM_CONSTANT_CONDITION_END
 
 #endif
 

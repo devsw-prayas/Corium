@@ -4,7 +4,7 @@
 #include "CoriumDiagnostics.h"
 
 namespace Corium::Cuda::Utils {
-	enum class CORIUM_RUNTIME_API CudaDeviceAttribute : uint8_t {
+	enum class CudaDeviceAttribute : uint8_t {
 		COMPUTE_CAPABILITY_MAJOR,               // Major SM version (architecture generation)
 		COMPUTE_CAPABILITY_MINOR,               // Minor SM version (architecture revision)
 
@@ -32,26 +32,26 @@ namespace Corium::Cuda::Utils {
 		CONCURRENT_MANAGED_ACCESS               // GPU can access managed memory concurrently with CPU (0/1); false on Windows WDDM
 	};
 
-	enum class CORIUM_RUNTIME_API ContextSchedulingFlags : uint8_t {
+	enum class ContextSchedulingFlags : uint8_t {
 		SCHEDULE_AUTO,
 		SCHEDULE_SPIN,
 		SCHEDULE_YIELD,
 		SCHEDULE_BLOCKING_SYNC
 	};
 
-	enum class CORIUM_RUNTIME_API ContextCreationFlags : uint8_t {
+	enum class ContextCreationFlags : uint8_t {
 		NONE,
 		MAP_HOST,
 		LMEM_RESIZE_TO_MAX
 	};
 
-	enum class CORIUM_RUNTIME_API HostAllocFlags : uint8_t {
+	enum class HostAllocFlags : uint8_t {
 		ALLOC_PORTABLE,
 		ALLOC_DEVICE_MAP,
 		ALLOC_WRITE_COMBINED
 	};
 
-	enum class CORIUM_RUNTIME_API HostRegisterFlags : uint8_t {
+	enum class HostRegisterFlags : uint8_t {
 		REG_PORTABLE,
 		REG_DEVICE_MAP,
 		REG_IO_MEMORY,
@@ -62,53 +62,53 @@ namespace Corium::Cuda::Utils {
 		CPU, GPU
 	};
 
-	enum class CORIUM_RUNTIME_API AllocationType : uint8_t {
+	enum class AllocationType : uint8_t {
 		INVALID,
 		PINNED,
 	};
 
-	enum class CORIUM_RUNTIME_API AllocationHandleType : uint8_t {
+	enum class AllocationHandleType : uint8_t {
 		NONE,
 		WIN32_HANDLE,
 		FABRIC_HANDLE
 	};
 
-	enum class CORIUM_RUNTIME_API AccessFlagBits : uint8_t {
+	enum class AccessFlagBits : uint8_t {
 		NONE      = 0,
 		READ      = 1 << 0,
 		READWRITE = 1 << 1
 	};
 
-	enum class CORIUM_RUNTIME_API AllocationGranularityOption : uint8_t {
+	enum class AllocationGranularityOption : uint8_t {
 		MINIMUM,
 		RECOMMENDED
 	};
 
-	enum class CORIUM_RUNTIME_API StreamFlags : uint8_t {
+	enum class StreamFlags : uint8_t {
 		DEFAULT,
 		NON_BLOCKING
 	};
 
-	enum class CORIUM_RUNTIME_API EventFlags : uint8_t {
+	enum class EventFlags : uint8_t {
 		DEFAULT        = 0,
 		BLOCKING_SYNC  = 1 << 0,
 		DISABLE_TIMING = 1 << 1,
 		INTERPROCESS   = 1 << 2
 	};
 
-	enum class CORIUM_RUNTIME_API StreamCaptureMode : uint8_t {
+	enum class StreamCaptureMode : uint8_t {
 		GLOBAL,
 		THREAD_LOCAL,
 		RELAXED
 	};
 
-	enum class CORIUM_RUNTIME_API StreamCaptureStatus : uint8_t {
+	enum class StreamCaptureStatus : uint8_t {
 		NONE,
 		ACTIVE,
 		INVALIDATED
 	};
 
-	enum class CORIUM_RUNTIME_API CopyMemoryType : uint8_t {
+	enum class CopyMemoryType : uint8_t {
 		HOST,
 		DEVICE,
 		ARRAY
@@ -512,7 +512,7 @@ namespace Corium::Cuda::Utils {
 	CORIUM_STATIC_ASSERT(std::is_trivially_copyable_v<GpuGraphNode>, "GpuGraphNode must be trivially copyable");
 	CORIUM_STATIC_ASSERT(std::is_trivially_move_assignable_v<GpuGraphNode>, "GpuGraphNode must be trivially move assignable");
 
-	enum class CORIUM_RUNTIME_API ExecAffinityType : uint8_t {
+	enum class ExecAffinityType : uint8_t {
 		SM_COUNT = 0
 	};
 
