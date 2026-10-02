@@ -172,6 +172,9 @@ namespace Corium::Core::Utils {
 			m_Entry = fn.m_Entry;
 		}
 
+		// Default ctor
+		FunctionView() = default;
+
 		CORIUM_NODISCARD R operator()(Args... args) const {
 			CORIUM_ASSERT(m_Entry != nullptr);
 			return m_Entry(m_Context, std::forward<Args>(args)...);
