@@ -10,10 +10,8 @@ else()
     project(Corium LANGUAGES CXX)
 endif()
 
-# Real MSVC (cl.exe) has no x64 inline-asm support, so CoriumFrame_ContextSwitch
-# is a true MASM .asm TU on that toolchain. clang-cl also sets CMAKE_CXX_COMPILER_ID
-# to "Clang" (not "MSVC"), so this correctly excludes it - clang-cl gets the
-# naked-function inline-asm implementation in CoriumFrameSwitchClang.cpp instead.
+# cl.exe has no x64 inline asm, so the context switch is MASM there; clang-cl (compiler ID "Clang")
+# uses the naked-function version in CoriumFrameSwitchClang.cpp instead.
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     enable_language(ASM_MASM)
 endif()
@@ -28,10 +26,7 @@ file(GLOB_RECURSE CORIUM_PUBLIC    CONFIGURE_DEPENDS "src/Public/*.h")
 file(GLOB_RECURSE CORIUM_PRIVATE   CONFIGURE_DEPENDS "src/Private/*.cpp")
 file(GLOB_RECURSE CORIUM_INTERNAL  CONFIGURE_DEPENDS "src/Internal/*.h")
 
-# MASM sources only participate in the build under real MSVC - see the
-# CoriumFrame_ContextSwitch comment above enable_language(ASM_MASM). Under any
-# other toolchain the Clang naked-function TU (picked up by CORIUM_PRIVATE's
-# *.cpp glob already) provides the same symbol instead.
+# Other toolchains get the same symbol from the Clang TU via the *.cpp glob.
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     file(GLOB_RECURSE CORIUM_ASM CONFIGURE_DEPENDS "src/Private/*.asm")
     set_source_files_properties(${CORIUM_ASM} PROPERTIES LANGUAGE ASM_MASM)
@@ -62,10 +57,7 @@ add_library(Corium ${CORIUM_LIB_TYPE}
     $<$<BOOL:${CORIUM_ENABLE_CUDA}>:${CORIUM_CUDA}>
 )
 
-# Listed unconditionally (not through the $<BOOL:...> guard above) -
-# source_group only registers a virtual-folder mapping, it doesn't need
-# the generator-expression gate add_library uses to conditionally compile
-# these files.
+# Unconditional: source_group only maps IDE folders, it doesn't compile anything.
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES
     ${CORIUM_PUBLIC}
     ${CORIUM_PRIVATE}
@@ -88,6 +80,8 @@ if (CORIUM_ENABLE_CUDA)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Cuda/Public
     )
     target_link_libraries(Corium PRIVATE CUDA::cuda_driver)
+    # CUDA 13's cuda.lib pulls in LIBCMT; everything else uses the DLL CRT.
+    target_link_options(Corium PRIVATE $<$<CXX_COMPILER_FRONTEND_VARIANT:MSVC>:/NODEFAULTLIB:LIBCMT>)
     target_compile_definitions(Corium PRIVATE CORIUM_CUDA_AVAILABLE)
     set_target_properties(Corium PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
@@ -115,9 +109,7 @@ target_compile_definitions(Corium PUBLIC CORIUM_DEFAULT_OS_TLS_SIZE=2)
 target_compile_definitions(Corium PUBLIC  CORIUM_SPACE_TLS_MIN_SIZE=2)
 target_compile_definitions(Corium PUBLIC  CORIUM_SPACE_TLS_MAX_SIZE=100)
 
-# Total per-node TLS VA region, in MiB. Default 4 GiB; capped at 10 GiB (see
-# static_assert in CoriumAddrSpace.h) to leave headroom in the per-node
-# reserved/future VA slice.
+# Per-node TLS VA region in MiB; capped at 10 GiB by a static_assert in CoriumAddrSpace.h.
 target_compile_definitions(Corium PUBLIC  CORIUM_SPACE_TLS_TOTAL=4096)
 
 target_compile_definitions(Corium PUBLIC  CORIUM_DEFAULT_FRAME_STACK_SIZE=2)
