@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 
+# No vcpkg dependencies; opt out of a user-wide `vcpkg integrate install` (its post-build step needs pwsh).
+if(NOT DEFINED CMAKE_VS_GLOBALS)
+    set(CMAKE_VS_GLOBALS "VcpkgEnabled=false")
+endif()
+
 option(CORIUM_ENABLE_CUDA "Enable CUDA GPU backend" ON)
 option(CORIUM_BUILD_SHARED "Build Corium as a shared library (DLL/SO); OFF builds a static library" ON)
 
