@@ -7,6 +7,7 @@
 #include "CoriumThread.h"
 #include "CoriumMemoryHandler.h"
 #include "InternalUtils.h"
+#include "CoriumFrame.h"
 
 #if CORIUM_COMPILER_MSVC
 #pragma comment(lib, "synchronization.lib")
@@ -149,50 +150,69 @@ namespace Corium::Core {
 	// so that DWORD/WINAPI never appear in the public header.
 	// Friended by ThreadHandle for private constructor access.
 
+	namespace {
+		// Set by attachThreadState, consumed by detachThreadState on the same thread.
+		thread_local Memory::VirtualSegment* t_TlsSegment = nullptr;
+		thread_local Memory::Allocators::GeneralAllocator* t_StateAllocator = nullptr;
+	}
+
 	namespace Internal {
 		struct ThreadLaunchHelper final {
 			static DWORD WINAPI WinThreadThunk(void* p_Raw) noexcept;
+
+			// Per-thread state every Corium thread needs; runs on the thread itself. Shared by factory
+			// threads (the thunk) and, later, adopted foreign threads (this_thread::attach).
+			static void attachThreadState(size_t v_Slot, size_t v_TlsSize, Memory::Allocators::GeneralAllocator* p_Allocator) noexcept;
+			static void detachThreadState(size_t v_Slot) noexcept;
 		};
+	}
+
+	void Internal::ThreadLaunchHelper::attachThreadState(size_t v_Slot, size_t v_TlsSize,
+		Memory::Allocators::GeneralAllocator* p_Allocator) noexcept {
+		RegistryEntry& entry = g_Registry[v_Slot];
+		entry.setState(ThreadState::RUNNING);
+
+		this_thread::t_Handle = ThreadHandle(v_Slot, entry.m_Generation, 0u, ThreadState::RUNNING);
+		this_thread::t_Permit = ParkHandle{ 0u };
+
+		const uint32_t numaNode = entry.m_NumaNode;
+		void* tlsMemory = Memory::Internal::AtomicAllocators::instance()
+			.s_TlsAllocator[numaNode].load(MemoryOrder::ACQUIRE)->allocate(v_TlsSize);
+
+		void* tlsSegmentMemory = p_Allocator->allocate(sizeof(Memory::VirtualSegment), alignof(Memory::VirtualSegment));
+		t_TlsSegment = p_Allocator->emplace<Memory::VirtualSegment>(
+			tlsSegmentMemory, tlsMemory, v_TlsSize, 0u, static_cast<uint8_t>(numaNode));
+		t_StateAllocator = p_Allocator;
+		this_thread::t_ThreadLocalAllocator.init(t_TlsSegment);
+
+		// The context switch saves registers at handle + 64, so the native context needs handle + blob
+		// contiguous even though it runs on the OS stack.
+		void* nativeContext = this_thread::t_ThreadLocalAllocator.allocate(Frame::kReservedHeaderSize, 64);
+		CORIUM_ASSERT(nativeContext != nullptr);
+		Frame::Internal::bindNativeContext(nativeContext, static_cast<uint8_t>(numaNode));
+	}
+
+	void Internal::ThreadLaunchHelper::detachThreadState(size_t v_Slot) noexcept {
+		// Native context storage lives in the TLS arena, so only the pointers need clearing.
+		Frame::Internal::unbindNativeContext();
+		g_Registry[v_Slot].setState(ThreadState::SEALED);
+
+		t_StateAllocator->deallocate(t_TlsSegment, sizeof(Memory::VirtualSegment));
+		t_TlsSegment = nullptr;
+		t_StateAllocator = nullptr;
 	}
 
 	DWORD WINAPI Internal::ThreadLaunchHelper::WinThreadThunk(void* p_Raw) noexcept {
 #ifdef _WIN32
 		auto* context = static_cast<LaunchContext*>(p_Raw);
-		const size_t slot = context->m_Slot;
 
-		g_Registry[slot].setState(ThreadState::RUNNING);
-
-		// Populate TLS with this thread's handle and a fresh park permit.
-		this_thread::t_Handle = ThreadHandle(
-			slot,
-			g_Registry[slot].m_Generation,
-			0u,
-			ThreadState::RUNNING);
-		this_thread::t_Permit = ParkHandle{ 0u };
-
-		// Carve this thread's TLS slice and initialize the thread_local allocator.
-		// VirtualSegment is heap-allocated from the same GeneralAllocator as LaunchContext —
-		// one-time cost, irrelevant next to the kernel thread creation call.
-		const uint32_t numaNode = g_Registry[slot].m_NumaNode;
-		void* tlsMemory = Memory::Internal::AtomicAllocators::instance()
-			.s_TlsAllocator[numaNode].load(MemoryOrder::ACQUIRE)->allocate(context->m_TlsSize);
-
-		void* tlsSegmentMemory = context->m_Allocator->allocate(sizeof(Memory::VirtualSegment), alignof(Memory::VirtualSegment));
-		auto* tlsSegment = context->m_Allocator->emplace<Memory::VirtualSegment>(
-			tlsSegmentMemory, tlsMemory, context->m_TlsSize, 0u, static_cast<uint8_t>(numaNode));
-		this_thread::t_ThreadLocalAllocator.init(tlsSegment);
-
-		// Launch from launch address
+		attachThreadState(context->m_Slot, context->m_TlsSize, context->m_Allocator);
 		context->m_Closure();
-
-		g_Registry[slot].setState(ThreadState::SEALED);
+		detachThreadState(context->m_Slot);
 
 		auto* allocator = context->m_Allocator;
-		allocator->deallocate(tlsSegment, sizeof(Memory::VirtualSegment));
 		context->~LaunchContext();
 		allocator->deallocate(context, sizeof(LaunchContext));
-
-		// TODO Frame
 		return 0;
 #else
 		// TODO: Linux implementation

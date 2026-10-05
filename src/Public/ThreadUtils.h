@@ -174,5 +174,8 @@ namespace Corium::Core {
 		void destroy(T* p_Loc) noexcept {
 			p_Loc->~T();
 		}
+		
+		void attach();
+		void detach();
 	}
 }

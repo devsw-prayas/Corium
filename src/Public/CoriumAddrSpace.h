@@ -61,6 +61,8 @@ namespace Corium::Memory::Internal {
 		"CORIUM_SPACE_TLS_TOTAL must not exceed 10 GiB (4 GiB default + 6 GiB max growth), "
 		"to leave headroom in the per-node reserved/future VA slice");
 	constexpr Bytes FrameStorageSize = Bytes{ 4_GiB };
+	constexpr size_t FrameRegBlobSize = CORIUM_FRAME_REG_BLOB_SIZE;
+	CORIUM_STATIC_ASSERT(FrameRegBlobSize % 16 == 0, "CORIUM_FRAME_REG_BLOB_SIZE must keep the frame stack 16-byte aligned");
 	constexpr Bytes RuntimeVASize = Bytes{ 24_GiB };
 	constexpr Bytes TaskMetadataVASize = Bytes{ 32_GiB };
 	constexpr Bytes TaskPayloadVASize = Bytes{ 56_GiB };

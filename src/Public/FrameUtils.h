@@ -3,11 +3,14 @@
 #include "CoriumMemory.h"
 #include "CoriumUtility.h"
 #include "ThreadUtils.h"
+#include "CoriumAddrSpace.h"
+#include <cstddef>
 
 namespace Corium::Core::Frame {
 	using namespace Corium::Memory::Literals;
 
-	inline constexpr size_t kReservedHeaderSize = 320;
+	// FrameHandle (64 B) + register blob: 320 B on Win64, 144 B on SysV.
+	inline constexpr size_t kReservedHeaderSize = 64 + Corium::Memory::Internal::FrameRegBlobSize;
 	inline constexpr size_t kFrameStackSize = (CORIUM_DEFAULT_FRAME_STACK_SIZE) * 1_MiB;
 	inline constexpr size_t kFrameMaxStackSize = 8_MiB;
 	inline constexpr size_t kFrameMinStackSize = 64_KiB;
@@ -16,7 +19,7 @@ namespace Corium::Core::Frame {
 		"size must be less than 8MiB");
 
 	enum class CORIUM_RUNTIME_API FrameState : uint8_t {
-		READY, SUSPENDED, TERMINATED
+		READY, RUNNING, SUSPENDED, TERMINATED
 	};
 
 	enum class CORIUM_RUNTIME_API Provenance : uint8_t {
@@ -26,11 +29,11 @@ namespace Corium::Core::Frame {
 
 	// Identity is the address: stack offsets and m_RegBlob are computed against it, so no copy/move/operator&.
 	struct CORIUM_RUNTIME_API CORIUM_ALIGNAS(64) FrameHandle final {
-		Utils::FunctionView<void(void*)> m_Entry;
+		Utils::FunctionView<void()> m_Entry;
 		void*    m_StackPtr;
 		size_t   m_StackSize;
 		void*    m_RegBlob;	 	
-		uint8_t  m_Origin;
+		Provenance  m_Origin;
 		uint8_t  m_NumaNode;
 		FrameState m_State;
 		uint8_t  m_Reserved[21]; // 43B of fields above + 21B here = 64B (one cache line)
@@ -48,8 +51,15 @@ namespace Corium::Core::Frame {
 
 		~FrameHandle() = default;
 	};
+	
 	CORIUM_STATIC_ASSERT(sizeof(FrameHandle) == 64, "FrameHandle must be exactly one cache line");
 	CORIUM_STATIC_ASSERT(alignof(FrameHandle) == 64, "FrameHandle must be aligned to a full cache line");
+	CORIUM_STATIC_ASSERT(kReservedHeaderSize == sizeof(FrameHandle) + Corium::Memory::Internal::FrameRegBlobSize,
+		"kReservedHeaderSize must be exactly FrameHandle + register blob");
+
+	struct CORIUM_ALIGNAS(64) RegisterContext final {
+		std::byte m_Bytes[Memory::Internal::FrameRegBlobSize];
+	};
 
 	struct CORIUM_RUNTIME_API CORIUM_ALIGNAS(32) FrameStackDesc final {
 		void* m_Memory;

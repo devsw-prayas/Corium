@@ -1,10 +1,11 @@
 #pragma once
 #include <cstddef>
+#include <CoriumAddrSpace.h>
 
-// Register blob at FrameHandle + 64, 256 B. RIP is stored because the switch jumps, never returns.
-// Offsets must match every CoriumFrame_ContextSwitch implementation.
+// Register blob at FrameHandle + 64, sized per platform by CORIUM_FRAME_REG_BLOB_SIZE. RIP is stored
+// because the switch jumps, never returns. Offsets must match every CoriumFrame_ContextSwitch implementation.
 namespace Corium::Core::Frame::Internal {
-	inline constexpr size_t kRegBlobSize = 256;
+	inline constexpr size_t kRegBlobSize = Corium::Memory::Internal::FrameRegBlobSize;
 
 #if defined(_WIN32)
 	// Windows x64 callee-saved registers.
@@ -31,7 +32,7 @@ namespace Corium::Core::Frame::Internal {
 	inline constexpr size_t kOffsetXmm15 = 240;
 	inline constexpr size_t kRegBlobUsed = 256;
 
-	static_assert(kRegBlobUsed == kRegBlobSize, "Register blob layout must exactly fill the 256B budget");
+	CORIUM_STATIC_ASSERT(kRegBlobUsed == kRegBlobSize, "Win64 register blob layout must exactly fill CORIUM_FRAME_REG_BLOB_SIZE");
 #else
 	// Linux x64 SysV callee-saved registers.
 	inline constexpr size_t kOffsetRip   = 0;
@@ -45,7 +46,7 @@ namespace Corium::Core::Frame::Internal {
 	inline constexpr size_t kOffsetMxcsr = 64;
 	inline constexpr size_t kRegBlobUsed = 68;
 
-	static_assert(kRegBlobUsed <= kRegBlobSize, "Register blob layout must fit within the 256B budget");
+	CORIUM_STATIC_ASSERT(kRegBlobUsed <= kRegBlobSize, "SysV register blob layout must fit within CORIUM_FRAME_REG_BLOB_SIZE");
 #endif
 
 	// Saves into p_Self, resumes p_Incoming; on first dispatch p_Incoming is the trampoline's ctx.
