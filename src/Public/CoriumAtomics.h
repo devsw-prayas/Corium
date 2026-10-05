@@ -67,7 +67,7 @@ namespace Corium::Core::Atomics {
 	template<typename T, typename Valid = Intrinsic::ValidAtomicParameter<T>::Type>
 	CORIUM_NODISCARD_MSG("Cannot discard an atomic exchange") CORIUM_FORCEINLINE
 		Valid atomicExchange32(Valid* p_Memory, T v_Value, MemoryOrder v_Ordering) {
-		static_assert(sizeof(Valid) <= 4, "atomicExchange32 needs an operand of at most 4 bytes");
+		CORIUM_STATIC_ASSERT(sizeof(Valid) <= 4, "atomicExchange32 needs an operand of at most 4 bytes");
 		return detail::withOrder<Valid>(v_Ordering, [&]<MemoryOrder O>() requires detail::RmwOrder<O> {
 			return Fast::exchange<O>(p_Memory, static_cast<Valid>(v_Value));
 		});
@@ -76,7 +76,7 @@ namespace Corium::Core::Atomics {
 	template<typename T, typename Valid = Intrinsic::ValidAtomicParameter<T>::Type>
 	CORIUM_NODISCARD_MSG("Cannot discard an atomic exchange") CORIUM_FORCEINLINE
 		Valid atomicExchange64(Valid* p_Memory, T v_Value, MemoryOrder v_Ordering) {
-		static_assert(sizeof(Valid) == 8, "atomicExchange64 needs an 8-byte operand");
+		CORIUM_STATIC_ASSERT(sizeof(Valid) == 8, "atomicExchange64 needs an 8-byte operand");
 		return detail::withOrder<Valid>(v_Ordering, [&]<MemoryOrder O>() requires detail::RmwOrder<O> {
 			return Fast::exchange<O>(p_Memory, static_cast<Valid>(v_Value));
 		});
@@ -90,7 +90,7 @@ namespace Corium::Core::Atomics {
 			return withOrder<Valid>(v_Success, [&]<MemoryOrder S>() requires RmwOrder<S> {
 				return withOrder<Valid>(v_Failure, [&]<MemoryOrder F>() requires (F == MemoryOrder::RELAXED || F == MemoryOrder::ACQUIRE || F == MemoryOrder::SEQ_CST) {
 					Valid observed = static_cast<Valid>(*p_Expected);
-					(void)Fast::compareExchange<S, F>(p_Memory, observed, static_cast<Valid>(v_Desired));
+					CORIUM_UNUSED((Fast::compareExchange<S, F>(p_Memory, observed, static_cast<Valid>(v_Desired))));
 					return observed;
 				});
 			});
@@ -100,21 +100,21 @@ namespace Corium::Core::Atomics {
 	template<typename T, typename Valid = Intrinsic::ValidAtomicParameter<T>::Type>
 	CORIUM_NODISCARD_MSG("Cannot discard an atomic compare exchange") CORIUM_FORCEINLINE
 		Valid atomicCompareExchange32(Valid* p_Memory, T* v_Expected, T v_Desired, MemoryOrder v_OrderingSuccess, MemoryOrder v_OrderingFailure) {
-		static_assert(sizeof(Valid) <= 4, "atomicCompareExchange32 needs an operand of at most 4 bytes");
+		CORIUM_STATIC_ASSERT(sizeof(Valid) <= 4, "atomicCompareExchange32 needs an operand of at most 4 bytes");
 		return detail::compareExchangeImpl(p_Memory, v_Expected, v_Desired, v_OrderingSuccess, v_OrderingFailure);
 	}
 
 	template<typename T, typename Valid = Intrinsic::ValidAtomicParameter<T>::Type>
 	CORIUM_NODISCARD_MSG("Cannot discard an atomic compare exchange") CORIUM_FORCEINLINE
 		Valid atomicCompareExchange64(Valid* p_Memory, T* v_Expected, T v_Desired, MemoryOrder v_OrderingSuccess, MemoryOrder v_OrderingFailure) {
-		static_assert(sizeof(Valid) == 8, "atomicCompareExchange64 needs an 8-byte operand");
+		CORIUM_STATIC_ASSERT(sizeof(Valid) == 8, "atomicCompareExchange64 needs an 8-byte operand");
 		return detail::compareExchangeImpl(p_Memory, v_Expected, v_Desired, v_OrderingSuccess, v_OrderingFailure);
 	}
 
 	template<typename T, typename Valid = Intrinsic::ValidAtomicParameter<T>::Type>
 	CORIUM_NODISCARD_MSG("Cannot discard an atomic fetch add") CORIUM_FORCEINLINE
 		Valid atomicFetchAdd32(Valid* p_Memory, T v_Value, MemoryOrder v_Ordering) {
-		static_assert(sizeof(Valid) <= 4, "atomicFetchAdd32 needs an operand of at most 4 bytes");
+		CORIUM_STATIC_ASSERT(sizeof(Valid) <= 4, "atomicFetchAdd32 needs an operand of at most 4 bytes");
 		return detail::withOrder<Valid>(v_Ordering, [&]<MemoryOrder O>() requires detail::RmwOrder<O> {
 			return Fast::fetchAdd<O>(p_Memory, static_cast<Valid>(v_Value));
 		});
@@ -123,7 +123,7 @@ namespace Corium::Core::Atomics {
 	template<typename T, typename Valid = Intrinsic::ValidAtomicParameter<T>::Type>
 	CORIUM_NODISCARD_MSG("Cannot discard an atomic fetch add") CORIUM_FORCEINLINE
 		Valid atomicFetchAdd64(Valid* p_Memory, T v_Value, MemoryOrder v_Ordering) {
-		static_assert(sizeof(Valid) == 8, "atomicFetchAdd64 needs an 8-byte operand");
+		CORIUM_STATIC_ASSERT(sizeof(Valid) == 8, "atomicFetchAdd64 needs an 8-byte operand");
 		return detail::withOrder<Valid>(v_Ordering, [&]<MemoryOrder O>() requires detail::RmwOrder<O> {
 			return Fast::fetchAdd<O>(p_Memory, static_cast<Valid>(v_Value));
 		});
@@ -132,7 +132,7 @@ namespace Corium::Core::Atomics {
 	template<typename T, typename Valid = Intrinsic::ValidAtomicParameter<T>::Type>
 	CORIUM_NODISCARD_MSG("Cannot discard an atomic increment") CORIUM_FORCEINLINE
 		Valid atomicIncrement32(Valid* p_Memory, MemoryOrder v_Ordering) {
-		static_assert(sizeof(Valid) <= 4, "atomicIncrement32 needs an operand of at most 4 bytes");
+		CORIUM_STATIC_ASSERT(sizeof(Valid) <= 4, "atomicIncrement32 needs an operand of at most 4 bytes");
 		return detail::withOrder<Valid>(v_Ordering, [&]<MemoryOrder O>() requires detail::RmwOrder<O> {
 			return Fast::increment<O>(p_Memory);
 		});
@@ -141,7 +141,7 @@ namespace Corium::Core::Atomics {
 	template<typename T, typename Valid = Intrinsic::ValidAtomicParameter<T>::Type>
 	CORIUM_NODISCARD_MSG("Cannot discard an atomic increment") CORIUM_FORCEINLINE
 		Valid atomicIncrement64(Valid* p_Memory, MemoryOrder v_Ordering) {
-		static_assert(sizeof(Valid) == 8, "atomicIncrement64 needs an 8-byte operand");
+		CORIUM_STATIC_ASSERT(sizeof(Valid) == 8, "atomicIncrement64 needs an 8-byte operand");
 		return detail::withOrder<Valid>(v_Ordering, [&]<MemoryOrder O>() requires detail::RmwOrder<O> {
 			return Fast::increment<O>(p_Memory);
 		});
@@ -150,7 +150,7 @@ namespace Corium::Core::Atomics {
 	template<typename T, typename Valid = Intrinsic::ValidAtomicParameter<T>::Type>
 	CORIUM_NODISCARD_MSG("Cannot discard an atomic decrement") CORIUM_FORCEINLINE
 		Valid atomicDecrement32(Valid* p_Memory, MemoryOrder v_Ordering) {
-		static_assert(sizeof(Valid) <= 4, "atomicDecrement32 needs an operand of at most 4 bytes");
+		CORIUM_STATIC_ASSERT(sizeof(Valid) <= 4, "atomicDecrement32 needs an operand of at most 4 bytes");
 		return detail::withOrder<Valid>(v_Ordering, [&]<MemoryOrder O>() requires detail::RmwOrder<O> {
 			return Fast::decrement<O>(p_Memory);
 		});
@@ -159,7 +159,7 @@ namespace Corium::Core::Atomics {
 	template<typename T, typename Valid = Intrinsic::ValidAtomicParameter<T>::Type>
 	CORIUM_NODISCARD_MSG("Cannot discard an atomic decrement") CORIUM_FORCEINLINE
 		Valid atomicDecrement64(Valid* p_Memory, MemoryOrder v_Ordering) {
-		static_assert(sizeof(Valid) == 8, "atomicDecrement64 needs an 8-byte operand");
+		CORIUM_STATIC_ASSERT(sizeof(Valid) == 8, "atomicDecrement64 needs an 8-byte operand");
 		return detail::withOrder<Valid>(v_Ordering, [&]<MemoryOrder O>() requires detail::RmwOrder<O> {
 			return Fast::decrement<O>(p_Memory);
 		});

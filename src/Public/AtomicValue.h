@@ -21,11 +21,12 @@
 #pragma once
 
 #include "Atomics.h"
+#include "CoriumDiagnostics.h"
 
 namespace Corium::Atomics {
 	// One value, any 1/2/4/8 byte atomic word. sizeof(AtomicValue<T>) == sizeof(T): no padding to 4, no widening.
 	template<AtomicWord T>
-	struct alignas(sizeof(T)) AtomicValue final {
+	struct CORIUM_ALIGNAS(sizeof(T)) AtomicValue final {
 	private:
 		T m_Value;
 
@@ -41,13 +42,13 @@ namespace Corium::Atomics {
 		AtomicValue& operator=(AtomicValue&&) noexcept = default;
 
 		template<MemoryOrder Order = MemoryOrder::SEQ_CST> requires LoadOrder<Order>
-		[[nodiscard]] CORIUM_FORCEINLINE T load() const noexcept { return Atomics::load<Order>(&m_Value); }
+		CORIUM_NODISCARD CORIUM_FORCEINLINE T load() const noexcept { return Atomics::load<Order>(&m_Value); }
 
 		template<MemoryOrder Order = MemoryOrder::SEQ_CST> requires StoreOrder<Order>
 		CORIUM_FORCEINLINE void store(T v_Value) noexcept { Atomics::store<Order>(&m_Value, v_Value); }
 
 		template<MemoryOrder Order = MemoryOrder::SEQ_CST>
-		[[nodiscard]] CORIUM_FORCEINLINE T exchange(T v_Value) noexcept { return Atomics::exchange<Order>(&m_Value, v_Value); }
+		CORIUM_NODISCARD CORIUM_FORCEINLINE T exchange(T v_Value) noexcept { return Atomics::exchange<Order>(&m_Value, v_Value); }
 
 		template<MemoryOrder Success = MemoryOrder::SEQ_CST, MemoryOrder Failure = detail::failureOrderFor(Success)>
 			requires CasOrders<Success, Failure>
@@ -97,6 +98,6 @@ namespace Corium::Atomics {
 		CORIUM_FORCEINLINE const T* data() const noexcept { return &m_Value; }
 	};
 
-	static_assert(sizeof(AtomicValue<uint8_t>) == 1 && sizeof(AtomicValue<uint16_t>) == 2
+	CORIUM_STATIC_ASSERT(sizeof(AtomicValue<uint8_t>) == 1 && sizeof(AtomicValue<uint16_t>) == 2
 		&& sizeof(AtomicValue<uint32_t>) == 4 && sizeof(AtomicValue<uint64_t>) == 8, "AtomicValue must not widen");
 }

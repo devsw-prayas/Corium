@@ -35,7 +35,7 @@
 
 namespace Corium::Atomics {
 	template<MemoryOrder Order = MemoryOrder::SEQ_CST, AtomicWord T> requires LoadOrder<Order>
-	[[nodiscard]] CORIUM_FORCEINLINE T load(const T* p_Memory) noexcept {
+	CORIUM_NODISCARD CORIUM_FORCEINLINE T load(const T* p_Memory) noexcept {
 		return std::bit_cast<T>(detail::rawLoad<Order>(reinterpret_cast<const detail::Raw<T>*>(p_Memory)));
 	}
 
@@ -45,7 +45,7 @@ namespace Corium::Atomics {
 	}
 
 	template<MemoryOrder Order = MemoryOrder::SEQ_CST, AtomicWord T>
-	[[nodiscard]] CORIUM_FORCEINLINE T exchange(T* p_Memory, std::type_identity_t<T> v_Value) noexcept {
+	CORIUM_NODISCARD CORIUM_FORCEINLINE T exchange(T* p_Memory, std::type_identity_t<T> v_Value) noexcept {
 		return std::bit_cast<T>(detail::rawExchange<Order>(reinterpret_cast<detail::Raw<T>*>(p_Memory), std::bit_cast<detail::Raw<T>>(v_Value)));
 	}
 

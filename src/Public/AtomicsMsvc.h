@@ -26,6 +26,7 @@
 
 #include "AtomicsCore.h"
 #include "CoriumCompiler.h"
+#include "CoriumDiagnostics.h"
 #include <intrin.h>
 
 #if !defined(_M_X64)
@@ -50,7 +51,7 @@ namespace Corium::Atomics::detail {
 		else if constexpr (sizeof(U) == 2) v = static_cast<U>(__iso_volatile_load16(reinterpret_cast<const volatile short*>(p_Memory)));
 		else if constexpr (sizeof(U) == 4) v = static_cast<U>(__iso_volatile_load32(reinterpret_cast<const volatile int*>(p_Memory)));
 		else v = static_cast<U>(__iso_volatile_load64(reinterpret_cast<const volatile __int64*>(p_Memory)));
-		if constexpr (Order != MemoryOrder::RELAXED) _ReadWriteBarrier();
+		if constexpr (Order != MemoryOrder::RELAXED) CORIUM_COMPILER_BARRIER();
 		return v;
 	}
 
@@ -65,9 +66,9 @@ namespace Corium::Atomics::detail {
 	template<MemoryOrder Order, typename U>
 	CORIUM_FORCEINLINE void rawStore(U* p_Memory, U v_Value) noexcept {
 		if constexpr (Order == MemoryOrder::SEQ_CST) {
-			(void)rawExchange<Order>(p_Memory, v_Value);
+			CORIUM_UNUSED(rawExchange<Order>(p_Memory, v_Value));
 		} else {
-			if constexpr (Order == MemoryOrder::RELEASE) _ReadWriteBarrier();
+			if constexpr (Order == MemoryOrder::RELEASE) CORIUM_COMPILER_BARRIER();
 			if constexpr (sizeof(U) == 1) __iso_volatile_store8(reinterpret_cast<volatile char*>(p_Memory), static_cast<char>(v_Value));
 			else if constexpr (sizeof(U) == 2) __iso_volatile_store16(reinterpret_cast<volatile short*>(p_Memory), static_cast<short>(v_Value));
 			else if constexpr (sizeof(U) == 4) __iso_volatile_store32(reinterpret_cast<volatile int*>(p_Memory), static_cast<int>(v_Value));
@@ -131,9 +132,9 @@ namespace Corium::Atomics::detail {
 	template<MemoryOrder Order>
 	CORIUM_FORCEINLINE void fence() noexcept {
 		if constexpr (Order == MemoryOrder::SEQ_CST) _mm_mfence();
-		else if constexpr (Order != MemoryOrder::RELAXED) _ReadWriteBarrier();
+		else if constexpr (Order != MemoryOrder::RELAXED) CORIUM_COMPILER_BARRIER();
 	}
 
-	CORIUM_FORCEINLINE void compilerFence() noexcept { _ReadWriteBarrier(); }
+	CORIUM_FORCEINLINE void compilerFence() noexcept { CORIUM_COMPILER_BARRIER(); }
 	CORIUM_FORCEINLINE void pause() noexcept { _mm_pause(); }
 }

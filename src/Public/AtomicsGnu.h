@@ -74,7 +74,7 @@ namespace Corium::Atomics::detail {
 	template<MemoryOrder Order>
 	CORIUM_FORCEINLINE void fence() noexcept { if constexpr (Order != MemoryOrder::RELAXED) __atomic_thread_fence(gnuOrder(Order)); }
 
-	CORIUM_FORCEINLINE void compilerFence() noexcept { __atomic_signal_fence(__ATOMIC_SEQ_CST); }
+	CORIUM_FORCEINLINE void compilerFence() noexcept { CORIUM_COMPILER_BARRIER(); }
 
 	CORIUM_FORCEINLINE void pause() noexcept {
 #if defined(__x86_64__) || defined(__i386__)
