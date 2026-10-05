@@ -1,5 +1,5 @@
 #pragma once
-#include "AtomicVariable.h"
+#include "AtomicVar.h"
 #include "ThreadUtils.h"
 #include "CoriumChrono.h"
 #include "CoriumThread.h"

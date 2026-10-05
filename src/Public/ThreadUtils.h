@@ -22,7 +22,7 @@
 #include <Corium.h>
 #include <CoriumUtility.h>
 
-#include "AtomicVariable.h"
+#include "AtomicVar.h"
 #include "EngineAllocators.h"
 #include "CoriumMemoryHandler.h"
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AtomicVariable.h"
+#include "AtomicVar.h"
 #include "CoriumAllocator.h"
 #include "CoriumMemory.h"
 #include "PlatIntrin.h"
