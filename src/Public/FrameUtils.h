@@ -36,7 +36,8 @@ namespace Corium::Core::Frame {
 		Provenance  m_Origin;
 		uint8_t  m_NumaNode;
 		FrameState m_State;
-		uint8_t  m_Reserved[21]; // 43B of fields above + 21B here = 64B (one cache line)
+		Flag     m_IsNative;     // Pinned to its thread: never migrated or killed.
+		uint8_t  m_Reserved[20]; // 44B of fields above + 20B here = 64B (one cache line)
 
 		FrameHandle() = default;
 

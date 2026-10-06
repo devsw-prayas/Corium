@@ -130,6 +130,11 @@ endif()
 option(CORIUM_ENABLE_DEBUG_CHECKS "Enable Corium debug asserts/checks" ON)
 target_compile_definitions(Corium PUBLIC $<$<BOOL:${CORIUM_ENABLE_DEBUG_CHECKS}>:DEBUG>)
 
+# Fiber-safe TLS: frames migrate between threads.
+if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    target_compile_options(Corium PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/GT>)
+endif()
+
 if (MSVC)
     set_property(TARGET Corium PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"

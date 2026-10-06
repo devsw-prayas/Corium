@@ -14,14 +14,16 @@ namespace Corium::Core::Frame {
         thread_local FrameHandle* t_CurrentFrame = nullptr;
         // Set by switchTo(..., terminate = true); consumed on the landing side by afterSwitch.
         thread_local FrameHandle* t_PendingReclaim = nullptr;
+        // Published SUSPENDED by afterSwitch, once its blob is fully saved.
+        thread_local FrameHandle* t_PendingSuspend = nullptr;
     }
 
-    FrameHandle& this_thread::nativeContext() {
+    CORIUM_NOINLINE FrameHandle& this_thread::nativeContext() {
         CORIUM_ASSERT(t_NativeContext != nullptr && "thread is not attached to Corium");
         return *t_NativeContext;
     }
 
-    FrameHandle* this_thread::currentFrame() {
+    CORIUM_NOINLINE FrameHandle* this_thread::currentFrame() {
         return t_CurrentFrame;
     }
 
@@ -33,6 +35,7 @@ namespace Corium::Core::Frame {
         // The thread is running on it right now, and its memory belongs to the thread's TLS arena, never the frame pool.
         handle->m_State = FrameState::RUNNING;
         handle->m_Origin = Provenance::CALLEE_OWNED;
+        handle->m_IsNative = true;
         t_NativeContext = handle;
         t_CurrentFrame = handle;
     }
@@ -61,8 +64,14 @@ namespace Corium::Core::Frame {
         }
 
         // Runs wherever a switch lands: after the context switch returns in captureFrame (resumed frame)
-        // and at trampoline start (fresh frame). Only here has the terminated frame fully left its stack.
-        void afterSwitch() noexcept {
+        // and at trampoline start (fresh frame). Only here has the outgoing frame fully left its stack.
+        // Noinline: the frame may have migrated, so TLS must be resolved on the landing carrier.
+        CORIUM_NOINLINE void afterSwitch() noexcept {
+            if (FrameHandle* parked = t_PendingSuspend) {
+                t_PendingSuspend = nullptr;
+                ::Corium::Atomics::store<::Corium::Atomics::MemoryOrder::RELEASE>(&parked->m_State, FrameState::SUSPENDED);
+            }
+
             FrameHandle* dead = t_PendingReclaim;
             if (!dead) return;
             t_PendingReclaim = nullptr;
@@ -81,16 +90,31 @@ namespace Corium::Core::Frame {
             NativeFrame::yieldToNative(self, true);
             CORIUM_UNREACHABLE();
         }
+
+        // Acquire pairs with afterSwitch's release, so a migrated frame arrives with its blob complete.
+        bool claim(FrameHandle* p_Frame) noexcept {
+            using ::Corium::Atomics::MemoryOrder;
+            FrameState expected = ::Corium::Atomics::load<MemoryOrder::ACQUIRE>(&p_Frame->m_State);
+            if (expected != FrameState::READY && expected != FrameState::SUSPENDED) return false;
+            return ::Corium::Atomics::compareExchange<MemoryOrder::ACQ_REL>(&p_Frame->m_State, expected, FrameState::RUNNING);
+        }
     }
 
     void this_thread::captureFrame(FrameHandle *p_Incoming){
         auto* self = this_thread::currentFrame();
         CORIUM_ASSERT(self != p_Incoming && "Cannot capture a frame already held by the thread");
-        CORIUM_ASSERT(p_Incoming->m_State != FrameState::TERMINATED && "Incoming frame cannot be terminated");
-        CORIUM_ASSERT(p_Incoming->m_State != FrameState::RUNNING && "Incoming frame cannot be running");
+        CORIUM_ASSERT((!p_Incoming->m_IsNative || p_Incoming == t_NativeContext) && "Native contexts never migrate");
+
+        const bool claimed = claim(p_Incoming);
+        CORIUM_ASSERT(claimed && "Incoming frame must be READY or SUSPENDED and unclaimed");
+        if (!claimed) {
+            if (t_PendingReclaim == self) t_PendingReclaim = nullptr;
+            return;
+        }
+
         t_CurrentFrame = p_Incoming;
-        t_CurrentFrame->m_State = FrameState::RUNNING;
-        self->m_State = FrameState::SUSPENDED;
+        // A terminating frame must never become claimable.
+        if (t_PendingReclaim != self) t_PendingSuspend = self;
         Internal::CoriumFrame_ContextSwitch(self, p_Incoming);
         afterSwitch();
     }
@@ -188,6 +212,7 @@ namespace Corium::Core::Frame {
     void NativeFrame::killFrame(FrameHandle* p_Target) {
         CORIUM_ASSERT(p_Target != nullptr);
         CORIUM_ASSERT(p_Target != this_thread::currentFrame() && "Cannot kill the frame that is running");
+        CORIUM_ASSERT(!p_Target->m_IsNative && "Cannot kill a thread's native context");
         CORIUM_ASSERT(p_Target->m_State != FrameState::RUNNING && "Cannot kill a running frame");
 
         auto* base = static_cast<uint8_t*>(p_Target->m_StackPtr);
