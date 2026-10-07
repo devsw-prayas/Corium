@@ -21,7 +21,6 @@
 #pragma once
 #include <Corium.h>
 #include "CoriumAllocator.h"
-#include "CoriumMemoryHandler.h"
 #include "EngineAllocators.h"
 
 namespace Corium::Core::Utils {
@@ -180,23 +179,13 @@ namespace Corium::Core::Utils {
 		}
 	};
 
-	// Owning closure on a NUMA node's closure allocator; an out-of-range node falls back to 0.
+	// Out of line so the allocator registry stays out of public headers. An out-of-range node falls back to 0.
+	CORIUM_RUNTIME_API Memory::Allocators::ClosureAllocator* closureAllocator(uint8_t v_Node) noexcept;
+
+	// Owning closure on a NUMA node's closure allocator.
 	template<typename S, typename L>
 	auto makeClosure(L&& u_Lambda, uint8_t node = 0) {
 		using Alloc = Corium::Memory::Allocators::ClosureAllocator;
-
-		const uint8_t safeNode = (node < Memory::Internal::AllocatorRegistry::s_NodeCount)
-			? node
-			: 0;
-
-		auto* alloc = Corium::Memory::Internal::AtomicAllocators
-			::instance()
-			.s_ClosureAllocator[safeNode]
-			.load();
-
-		return Corium::Core::Utils::ClosureFunction<Alloc, S>(
-			std::forward<L>(u_Lambda),
-			alloc
-		);
+		return Corium::Core::Utils::ClosureFunction<Alloc, S>(std::forward<L>(u_Lambda), closureAllocator(node));
 	}
 }

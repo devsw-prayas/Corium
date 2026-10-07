@@ -1,5 +1,6 @@
 #include "Corium.h"
 #include "CoriumMemoryHandler.h"
+#include "CoriumUtility.h"
 
 namespace Corium::Memory::Internal {
 
@@ -78,5 +79,13 @@ namespace Corium::Memory::Internal {
 	AtomicAllocators& AtomicAllocators::instance() {
 		static AtomicAllocators inst;
 		return inst;
+	}
+}
+
+namespace Corium::Core::Utils {
+	Memory::Allocators::ClosureAllocator* closureAllocator(uint8_t v_Node) noexcept {
+		using namespace Memory::Internal;
+		const uint8_t node = v_Node < AllocatorRegistry::s_NodeCount ? v_Node : 0;
+		return AtomicAllocators::instance().s_ClosureAllocator[node].load();
 	}
 }

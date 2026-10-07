@@ -1,4 +1,5 @@
 #include "Corium.h"
+#include "CoriumMemoryHandler.h"
 #include "CoriumAsm.h"
 #include "CoriumCompiler.h"
 #include "CoriumDiagnostics.h"

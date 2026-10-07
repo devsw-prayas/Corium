@@ -19,7 +19,8 @@
 * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND...
 */
 #pragma once
-#include "CoriumMemoryHandler.h"
+#include "AtomicVar.h"
+#include "EngineAllocators.h"
 #include "CoriumAtomics.h"
 
 namespace Corium::Memory {

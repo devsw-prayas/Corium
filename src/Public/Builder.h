@@ -39,8 +39,7 @@ namespace Corium::Execution::Builder {
 			if (ro_Frame.isBuilt())  return false;
 
 			using CF    = Core::Utils::ClosureFunction<Memory::Allocators::ClosureAllocator, void(TaskContext&)>;
-			auto* allocator = Memory::Internal::AtomicAllocators::instance()
-				.s_ClosureAllocator[ro_Desc.m_NumaNode].load();
+			auto* allocator = Core::Utils::closureAllocator(static_cast<uint8_t>(ro_Desc.m_NumaNode));
 
 			void* memory = allocator->allocate(sizeof(CF), alignof(CF));
 			CF* function = memory

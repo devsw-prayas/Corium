@@ -24,7 +24,6 @@
 
 #include "AtomicVar.h"
 #include "EngineAllocators.h"
-#include "CoriumMemoryHandler.h"
 
 namespace Corium::Core {
 	// Forward declaration — implementation lives in CoriumThread.cpp.

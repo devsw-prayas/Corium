@@ -5,8 +5,23 @@
 #include "CoriumSync.h"
 #include "CoriumThread.h"
 #include "PlatIntrin.h"
+#include "CoriumMemoryHandler.h"
 
 namespace Corium::Runtime::Sync {
+	uint32_t Internal::exchangerSlotCount() noexcept {
+		CORIUM_ASSERT(Memory::Internal::AllocatorRegistry::isRegistered);
+		const uint32_t count = Memory::Internal::AllocatorRegistry::s_NodeCount * 8u;
+		return count < 8u ? 8u : count;
+	}
+
+	void* Internal::allocateExchangerSlots(size_t v_Bytes, size_t v_Align) noexcept {
+		return Memory::Internal::AllocatorRegistry::s_GeneralAllocator[0].allocateImpl(v_Bytes, v_Align);
+	}
+
+	void Internal::freeExchangerSlots(void* p_Memory, size_t v_Bytes) noexcept {
+		Memory::Internal::AllocatorRegistry::s_GeneralAllocator[0].deallocateImpl(p_Memory, v_Bytes);
+	}
+
 	CountDownLatch::CountDownLatch(uint32_t v_Count) : m_Counter(v_Count) {}
 
 	void CountDownLatch::countDown() {

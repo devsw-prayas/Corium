@@ -4,7 +4,7 @@
 #include "CoriumMemory.h"
 
 namespace Corium::Memory::Internal {
-	struct CORIUM_RUNTIME_API AllocatorRegistry final {
+	struct AllocatorRegistry final {
 		~AllocatorRegistry() = delete;
 		AllocatorRegistry(const AllocatorRegistry&) = delete;
 		AllocatorRegistry(AllocatorRegistry&&) noexcept = delete;
@@ -160,7 +160,7 @@ namespace Corium::Memory::Internal {
 		}
 	};
 
-	struct CORIUM_RUNTIME_API AtomicAllocators final {
+	struct AtomicAllocators final {
 		AtomicAllocators(const AtomicAllocators&) = delete;
 		AtomicAllocators(AtomicAllocators&&) noexcept = delete;
 

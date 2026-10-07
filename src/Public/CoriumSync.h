@@ -223,6 +223,13 @@ namespace Corium::Runtime::Sync {
 
 	// Two-thread rendezvous with value swap. Blocks until both parties arrive.
 	// Per-thread slots from g_RuntimeVA via GeneralAllocator. T must be movable.
+	namespace Internal {
+		// Out of line so the Exchanger template doesn't pull the allocator registry into public headers.
+		CORIUM_RUNTIME_API uint32_t exchangerSlotCount() noexcept;
+		CORIUM_RUNTIME_API void* allocateExchangerSlots(size_t v_Bytes, size_t v_Align) noexcept;
+		CORIUM_RUNTIME_API void freeExchangerSlots(void* p_Memory, size_t v_Bytes) noexcept;
+	}
+
 	template<typename T>
 	class Exchanger final {
 		static constexpr uint32_t SLOT_EMPTY = 0u;
@@ -247,11 +254,8 @@ namespace Corium::Runtime::Sync {
 
 	public:
 		Exchanger() {
-			CORIUM_ASSERT(Memory::Internal::AllocatorRegistry::isRegistered);
-			m_SlotCount = Memory::Internal::AllocatorRegistry::s_NodeCount * 8u;
-			if (m_SlotCount < 8u) m_SlotCount = 8u;
-			void* memory = Memory::Internal::AllocatorRegistry::s_GeneralAllocator[0]
-				.allocateImpl(sizeof(Slot) * m_SlotCount, alignof(Slot));
+			m_SlotCount = Internal::exchangerSlotCount();
+			void* memory = Internal::allocateExchangerSlots(sizeof(Slot) * m_SlotCount, alignof(Slot));
 			CORIUM_ASSERT(memory);
 			m_pSlots = static_cast<Slot*>(memory);
 			for (uint32_t i = 0; i < m_SlotCount; ++i)
@@ -262,8 +266,7 @@ namespace Corium::Runtime::Sync {
 			if (m_pSlots) {
 				for (uint32_t i = 0; i < m_SlotCount; ++i)
 					m_pSlots[i].~Slot();
-				Memory::Internal::AllocatorRegistry::s_GeneralAllocator[0]
-					.deallocateImpl(m_pSlots, sizeof(Slot) * m_SlotCount);
+				Internal::freeExchangerSlots(m_pSlots, sizeof(Slot) * m_SlotCount);
 			}
 		}
 

@@ -1,4 +1,5 @@
 #include "Corium.h"
+#include "CoriumMemoryHandler.h"
 #include "Inductor.h"
 #include "PipelineUtils.h"
 #include "CoriumEnvironment.h"
