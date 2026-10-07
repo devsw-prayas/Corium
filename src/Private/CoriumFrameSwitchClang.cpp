@@ -1,4 +1,5 @@
 // Windows x64 CoriumFrame_ContextSwitch for clang-cl; offsets per CoriumAsm.h.
+// Intel syntax, line-for-line with CoriumFrameSwitch.asm, so both Windows switches read the same.
 #include "CoriumAsm.h"
 #include "CoriumCompiler.h"
 
@@ -8,56 +9,79 @@
 // RSP switching is not unwindable; exceptions cannot cross the frame boundary.
 extern "C" __attribute__((naked)) void CoriumFrame_ContextSwitch(void* /*p_Self*/, void* /*p_Incoming*/) {
 	__asm__ volatile(
+		".intel_syntax noprefix\n\t"
+
 		// Save current context.
-		"movq (%rsp), %rax\n\t"
-		"movq %rax, 64(%rcx)\n\t"          // RIP
-		"leaq 8(%rsp), %rax\n\t"
-		"movq %rax, 72(%rcx)\n\t"          // RSP
-		"movq %rbx, 80(%rcx)\n\t"
-		"movq %rbp, 88(%rcx)\n\t"
-		"movq %rdi, 96(%rcx)\n\t"
-		"movq %rsi, 104(%rcx)\n\t"
-		"movq %r12, 112(%rcx)\n\t"
-		"movq %r13, 120(%rcx)\n\t"
-		"movq %r14, 128(%rcx)\n\t"
-		"movq %r15, 136(%rcx)\n\t"
-		"stmxcsr 144(%rcx)\n\t"
-		"movaps %xmm6,  160(%rcx)\n\t"
-		"movaps %xmm7,  176(%rcx)\n\t"
-		"movaps %xmm8,  192(%rcx)\n\t"
-		"movaps %xmm9,  208(%rcx)\n\t"
-		"movaps %xmm10, 224(%rcx)\n\t"
-		"movaps %xmm11, 240(%rcx)\n\t"
-		"movaps %xmm12, 256(%rcx)\n\t"
-		"movaps %xmm13, 272(%rcx)\n\t"
-		"movaps %xmm14, 288(%rcx)\n\t"
-		"movaps %xmm15, 304(%rcx)\n\t"
+		"mov     rax, [rsp]\n\t"                  // return address = this context's resume RIP
+		"mov     [rcx+64],  rax\n\t"              // RIP
+		"lea     rax, [rsp+8]\n\t"                // RSP as if we had returned
+		"mov     [rcx+72],  rax\n\t"              // RSP
+		"mov     [rcx+80],  rbx\n\t"
+		"mov     [rcx+88],  rbp\n\t"
+		"mov     [rcx+96],  rdi\n\t"
+		"mov     [rcx+104], rsi\n\t"
+		"mov     [rcx+112], r12\n\t"
+		"mov     [rcx+120], r13\n\t"
+		"mov     [rcx+128], r14\n\t"
+		"mov     [rcx+136], r15\n\t"
+		"stmxcsr dword ptr [rcx+144]\n\t"
+		"movaps  [rcx+160], xmm6\n\t"
+		"movaps  [rcx+176], xmm7\n\t"
+		"movaps  [rcx+192], xmm8\n\t"
+		"movaps  [rcx+208], xmm9\n\t"
+		"movaps  [rcx+224], xmm10\n\t"
+		"movaps  [rcx+240], xmm11\n\t"
+		"movaps  [rcx+256], xmm12\n\t"
+		"movaps  [rcx+272], xmm13\n\t"
+		"movaps  [rcx+288], xmm14\n\t"
+		"movaps  [rcx+304], xmm15\n\t"
+
+		// TEB stack bounds + x87 control word: blob offsets 256-287, handle-relative 320-351.
+		"mov     rax, qword ptr gs:[0x08]\n\t"    // StackBase
+		"mov     r8,  qword ptr gs:[0x10]\n\t"    // StackLimit
+		"mov     r9,  qword ptr gs:[0x1478]\n\t"  // DeallocationStack
+		"mov     [rcx+320], rax\n\t"
+		"mov     [rcx+328], r8\n\t"
+		"mov     [rcx+336], r9\n\t"
+		"fnstcw  word ptr [rcx+344]\n\t"
 
 		// Load incoming context.
-		"ldmxcsr 144(%rdx)\n\t"
-		"movaps 160(%rdx), %xmm6\n\t"
-		"movaps 176(%rdx), %xmm7\n\t"
-		"movaps 192(%rdx), %xmm8\n\t"
-		"movaps 208(%rdx), %xmm9\n\t"
-		"movaps 224(%rdx), %xmm10\n\t"
-		"movaps 240(%rdx), %xmm11\n\t"
-		"movaps 256(%rdx), %xmm12\n\t"
-		"movaps 272(%rdx), %xmm13\n\t"
-		"movaps 288(%rdx), %xmm14\n\t"
-		"movaps 304(%rdx), %xmm15\n\t"
-		"movq 80(%rdx),  %rbx\n\t"
-		"movq 88(%rdx),  %rbp\n\t"
-		"movq 96(%rdx),  %rdi\n\t"
-		"movq 104(%rdx), %rsi\n\t"
-		"movq 112(%rdx), %r12\n\t"
-		"movq 120(%rdx), %r13\n\t"
-		"movq 128(%rdx), %r14\n\t"
-		"movq 136(%rdx), %r15\n\t"
-		"movq 72(%rdx), %rax\n\t"          // incoming RSP
-		"movq %rax, %rsp\n\t"
-		"movq 64(%rdx), %rax\n\t"          // incoming RIP
-		"movq %rdx, %rcx\n\t"              // Set trampoline context.
-		"jmpq *%rax\n\t"
+		"ldmxcsr dword ptr [rdx+144]\n\t"
+		"fldcw   word ptr [rdx+344]\n\t"
+		"movaps  xmm6,  [rdx+160]\n\t"
+		"movaps  xmm7,  [rdx+176]\n\t"
+		"movaps  xmm8,  [rdx+192]\n\t"
+		"movaps  xmm9,  [rdx+208]\n\t"
+		"movaps  xmm10, [rdx+224]\n\t"
+		"movaps  xmm11, [rdx+240]\n\t"
+		"movaps  xmm12, [rdx+256]\n\t"
+		"movaps  xmm13, [rdx+272]\n\t"
+		"movaps  xmm14, [rdx+288]\n\t"
+		"movaps  xmm15, [rdx+304]\n\t"
+		"mov     rbx, [rdx+80]\n\t"
+		"mov     rbp, [rdx+88]\n\t"
+		"mov     rdi, [rdx+96]\n\t"
+		"mov     rsi, [rdx+104]\n\t"
+		"mov     r12, [rdx+112]\n\t"
+		"mov     r13, [rdx+120]\n\t"
+		"mov     r14, [rdx+128]\n\t"
+		"mov     r15, [rdx+136]\n\t"
+
+		// Incoming TEB bounds, right before the stack switch.
+		"mov     rax, [rdx+320]\n\t"
+		"mov     r8,  [rdx+328]\n\t"
+		"mov     r9,  [rdx+336]\n\t"
+		"mov     qword ptr gs:[0x08],   rax\n\t"
+		"mov     qword ptr gs:[0x10],   r8\n\t"
+		"mov     qword ptr gs:[0x1478], r9\n\t"
+
+		"mov     rax, [rdx+72]\n\t"               // incoming RSP
+		"mov     rsp, rax\n\t"
+		"mov     rax, [rdx+64]\n\t"               // incoming RIP
+		"mov     rcx, rdx\n\t"                    // trampoline ctx on first dispatch
+		"jmp     rax\n\t"
+
+		".att_syntax prefix\n\t"
 	);
 }
 

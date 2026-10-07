@@ -66,6 +66,7 @@ namespace Corium::Memory::Allocators {
 		static constexpr AllocationTrait trait = AllocationTrait::Persistent;
 	};
 
+	// TODO I need a TLSF, FreeList has to go.
 	struct alignas(64) CORIUM_RUNTIME_API GeneralAllocator final : IAllocator<void, BumpAllocator, GeneralAllocator>{
 	private:
 		struct alignas(16) BlockHeader final {

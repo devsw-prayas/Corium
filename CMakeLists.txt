@@ -119,10 +119,11 @@ target_compile_definitions(Corium PUBLIC  CORIUM_SPACE_TLS_TOTAL=4096)
 
 target_compile_definitions(Corium PUBLIC  CORIUM_DEFAULT_FRAME_STACK_SIZE=2)
 
-# NativeFrame register blob in bytes, fixed by the calling convention: Win64 also saves XMM6-15
-# (256 B used), SysV saves no XMM (68 B used, rounded up to 16 so the stack after it stays aligned).
+# NativeFrame register blob in bytes, fixed by the calling convention: Win64 also saves XMM6-15 plus the
+# TEB stack bounds and x87 control word (288 B used), SysV saves no XMM (68 B used, rounded up to 16 so the
+# stack after it stays aligned).
 if(WIN32)
-    target_compile_definitions(Corium PUBLIC CORIUM_FRAME_REG_BLOB_SIZE=256)
+    target_compile_definitions(Corium PUBLIC CORIUM_FRAME_REG_BLOB_SIZE=288)
 else()
     target_compile_definitions(Corium PUBLIC CORIUM_FRAME_REG_BLOB_SIZE=80)
 endif()

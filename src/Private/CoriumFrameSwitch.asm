@@ -31,8 +31,19 @@ CoriumFrame_ContextSwitch PROC
     movaps  [rcx+288], xmm14
     movaps  [rcx+304], xmm15
 
+    ; TEB stack bounds + x87 control word: blob offsets 256-287, handle-relative 320-351.
+    mov rax, qword ptr gs:[08h]
+    mov r8, qword ptr gs:[10h]
+    mov r9, qword ptr gs:[1478h]
+
+    mov [rcx+320], rax
+    mov [rcx+328], r8
+    mov [rcx+336], r9
+    fnstcw word ptr [rcx+344]
+
     ; Load incoming context.
     ldmxcsr dword ptr [rdx+144]
+    fldcw   word ptr [rdx+344]
     movaps  xmm6,  [rdx+160]
     movaps  xmm7,  [rdx+176]
     movaps  xmm8,  [rdx+192]
@@ -51,6 +62,15 @@ CoriumFrame_ContextSwitch PROC
     mov     r13, [rdx+120]
     mov     r14, [rdx+128]
     mov     r15, [rdx+136]
+    
+    mov rax, [rdx+320]
+    mov r8, [rdx+328]
+    mov r9, [rdx+336]
+
+    mov qword ptr gs:[08h], rax
+    mov qword ptr gs:[10h], r8
+    mov qword ptr gs:[1478h], r9
+
     mov     rax, [rdx+72]           ; incoming RSP
     mov     rsp, rax
     mov     rax, [rdx+64]           ; incoming RIP

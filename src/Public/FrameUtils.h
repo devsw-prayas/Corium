@@ -58,6 +58,12 @@ namespace Corium::Core::Frame {
 	CORIUM_STATIC_ASSERT(kReservedHeaderSize == sizeof(FrameHandle) + Corium::Memory::Internal::FrameRegBlobSize,
 		"kReservedHeaderSize must be exactly FrameHandle + register blob");
 
+	// The frame owns its entry closure: it is moved into the top of the frame's own block, above the stack.
+	using FrameEntry = Closure<void()>;
+	inline constexpr size_t kFrameEntrySlotSize = 32;
+	CORIUM_STATIC_ASSERT(sizeof(FrameEntry) == kFrameEntrySlotSize, "Frame entry slot must hold exactly one Closure<void()>");
+	CORIUM_STATIC_ASSERT(kFrameMinStackSize > kFrameEntrySlotSize, "Entry slot must leave the minimum stack usable");
+
 	struct CORIUM_ALIGNAS(64) RegisterContext final {
 		std::byte m_Bytes[Memory::Internal::FrameRegBlobSize];
 	};

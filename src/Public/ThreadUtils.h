@@ -35,10 +35,7 @@ namespace Corium::Core {
 	template<typename S>
 	using Closure = Utils::ClosureFunction<Memory::Allocators::ClosureAllocator, S>;
 
-	template<typename S, typename F>
-	Closure<S> createClosure(F&& u_Func) {
-		return Utils::buildClosure<S>(std::forward<F>(u_Func), 0);
-	}
+	using Utils::makeClosure;
 
 	using AffinityMask = size_t;
 	using ProcessorIdx = uint32_t;

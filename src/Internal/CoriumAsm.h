@@ -30,7 +30,13 @@ namespace Corium::Core::Frame::Internal {
 	inline constexpr size_t kOffsetXmm13 = 208;
 	inline constexpr size_t kOffsetXmm14 = 224;
 	inline constexpr size_t kOffsetXmm15 = 240;
-	inline constexpr size_t kRegBlobUsed = 256;
+	// Per-frame execution state outside the GPRs, one 32 B group. TEB fields: StackBase gs:[08h],
+	// StackLimit gs:[10h], DeallocationStack gs:[1478h] (undocumented, stable on x64 since XP).
+	inline constexpr size_t kOffsetStackBase    = 256;
+	inline constexpr size_t kOffsetStackLimit   = 264;
+	inline constexpr size_t kOffsetDeallocStack = 272;
+	inline constexpr size_t kOffsetFpcw         = 280;
+	inline constexpr size_t kRegBlobUsed = 288;
 
 	CORIUM_STATIC_ASSERT(kRegBlobUsed == kRegBlobSize, "Win64 register blob layout must exactly fill CORIUM_FRAME_REG_BLOB_SIZE");
 #else

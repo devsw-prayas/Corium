@@ -101,17 +101,16 @@ namespace Corium::Core::Utils {
 		template<typename L>
 			requires (!std::is_same_v<std::remove_cvref_t<L>, ClosureFunction>)
 		explicit ClosureFunction(L&& lambda, AllocatorType* allocator) {
-			if (!allocator) {
-				m_Context = nullptr;
-				m_Entry = nullptr;
-				return;
-			}
+			if (!allocator) return;
 			using LambdaT = std::decay_t<L>;
 
 			void* memory = allocator->allocate(sizeof(LambdaT), alignof(LambdaT));
 			LambdaT* stored = memory
 				? allocator->template emplace<LambdaT>(memory, std::forward<L>(lambda))
 				: nullptr;
+
+			// Allocation failed: stay fully empty, so isCallable() is false and operator() asserts instead of jumping with a null context.
+			if (!stored) return;
 
 			m_Context = stored;
 			m_Allocator = allocator;
@@ -181,8 +180,9 @@ namespace Corium::Core::Utils {
 		}
 	};
 
+	// Owning closure on a NUMA node's closure allocator; an out-of-range node falls back to 0.
 	template<typename S, typename L>
-	auto buildClosure(L&& u_Lambda, uint8_t node) {
+	auto makeClosure(L&& u_Lambda, uint8_t node = 0) {
 		using Alloc = Corium::Memory::Allocators::ClosureAllocator;
 
 		const uint8_t safeNode = (node < Memory::Internal::AllocatorRegistry::s_NodeCount)

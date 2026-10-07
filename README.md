@@ -71,7 +71,7 @@ This probes CPU/NUMA topology, reserves per-node virtual address space, and wire
 
 Corium::Core::Factory::DefaultThreadFactory factory;
 
-auto closure = Corium::Core::Utils::buildClosure<void()>([]() {
+auto closure = Corium::Core::Utils::makeClosure<void()>([]() {
     // runs on the new thread
 }, /* preferred NUMA node */ 0u);
 
