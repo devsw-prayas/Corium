@@ -1,5 +1,6 @@
 #include <Corium.h>
 #include <ThreadUtils.h>
+#include "ThreadLocals.h"
 
 namespace Corium::Core::this_thread {
 	thread_local ThreadHandle t_Handle = ThreadHandle::getInvalidThread();

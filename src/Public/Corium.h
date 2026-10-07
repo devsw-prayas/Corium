@@ -20,6 +20,8 @@
 */
 
 #pragma once
+#include <CoriumConfig.h>
+
 #ifndef CORIUM_RUNTIME_API
 #if defined(CORIUM_STATIC)
 #define CORIUM_RUNTIME_API

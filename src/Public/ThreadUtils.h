@@ -153,10 +153,6 @@ namespace Corium::Core {
 	};
 
 	namespace this_thread {
-		extern thread_local ThreadHandle                       t_Handle;
-		extern thread_local ParkHandle                         t_Permit;
-		extern thread_local Memory::Allocators::TlsAllocator   t_ThreadLocalAllocator;
-
 		CORIUM_RUNTIME_API Memory::Allocators::TlsAllocator& allocator() noexcept;
 		CORIUM_RUNTIME_API ThreadHandle& currentHandle() noexcept;
 		CORIUM_RUNTIME_API ParkHandle& currentPermit() noexcept;

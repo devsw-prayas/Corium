@@ -8,6 +8,7 @@
 #include "CoriumMemoryHandler.h"
 #include "InternalUtils.h"
 #include "CoriumFrame.h"
+#include "ThreadLocals.h"
 
 #if CORIUM_COMPILER_MSVC
 #pragma comment(lib, "synchronization.lib")

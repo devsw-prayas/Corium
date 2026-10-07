@@ -112,31 +112,42 @@ target_precompile_headers(Corium PRIVATE
 
 if (CORIUM_BUILD_SHARED)
     target_compile_definitions(Corium PRIVATE CORIUM_SHARED)
+    unset(CORIUM_STATIC)
 else()
-    target_compile_definitions(Corium PUBLIC CORIUM_STATIC)
+    set(CORIUM_STATIC ON)
 endif()
-target_compile_definitions(Corium PUBLIC CORIUM_MAX_NUMA=4)
-target_compile_definitions(Corium PUBLIC CORIUM_VA_ALLOCATION=524288)
-target_compile_definitions(Corium PUBLIC CORIUM_TIMEOUT=50)
-target_compile_definitions(Corium PUBLIC CORIUM_SPIN_COUNT=450)
-target_compile_definitions(Corium PUBLIC CORIUM_DEFAULT_OS_TLS_SIZE=2)
 
-target_compile_definitions(Corium PUBLIC  CORIUM_SPACE_TLS_MIN_SIZE=2)
-target_compile_definitions(Corium PUBLIC  CORIUM_SPACE_TLS_MAX_SIZE=100)
-
+# Tuning values land in a generated CoriumConfig.h, so consumers that don't use this CMake still see them.
+set(CORIUM_MAX_NUMA                 4      CACHE STRING "Maximum supported NUMA nodes")
+set(CORIUM_VA_ALLOCATION            524288 CACHE STRING "Total VA reservation in MiB")
+set(CORIUM_TIMEOUT                  50     CACHE STRING "Sync wait timeout")
+set(CORIUM_SPIN_COUNT               450    CACHE STRING "Spins before a sync primitive parks")
+set(CORIUM_DEFAULT_OS_TLS_SIZE      2      CACHE STRING "Default OS TLS size in MiB")
+set(CORIUM_SPACE_TLS_MIN_SIZE       2      CACHE STRING "Minimum per-thread TLS arena in MiB")
+set(CORIUM_SPACE_TLS_MAX_SIZE       100    CACHE STRING "Maximum per-thread TLS arena in MiB")
 # Per-node TLS VA region in MiB; capped at 10 GiB by a static_assert in CoriumAddrSpace.h.
-target_compile_definitions(Corium PUBLIC  CORIUM_SPACE_TLS_TOTAL=4096)
-
-target_compile_definitions(Corium PUBLIC  CORIUM_DEFAULT_FRAME_STACK_SIZE=2)
+set(CORIUM_SPACE_TLS_TOTAL          4096   CACHE STRING "Per-node TLS VA region in MiB")
+set(CORIUM_DEFAULT_FRAME_STACK_SIZE 2      CACHE STRING "Default pooled frame stack in MiB")
 
 # NativeFrame register blob in bytes, fixed by the calling convention: Win64 also saves XMM6-15 plus the
 # TEB stack bounds and x87 control word (288 B used), SysV saves no XMM (68 B used, rounded up to 16 so the
-# stack after it stays aligned).
+# stack after it stays aligned). Not a cache variable: it must match the switch.
 if(WIN32)
-    target_compile_definitions(Corium PUBLIC CORIUM_FRAME_REG_BLOB_SIZE=288)
+    set(CORIUM_FRAME_REG_BLOB_SIZE 288)
 else()
-    target_compile_definitions(Corium PUBLIC CORIUM_FRAME_REG_BLOB_SIZE=80)
+    set(CORIUM_FRAME_REG_BLOB_SIZE 80)
 endif()
+
+set(CORIUM_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+configure_file(src/Public/CoriumConfig.h.in ${CORIUM_GENERATED_DIR}/CoriumConfig.h @ONLY)
+target_include_directories(Corium PUBLIC ${CORIUM_GENERATED_DIR})
+target_sources(Corium PRIVATE ${CORIUM_GENERATED_DIR}/CoriumConfig.h)
+
+# Only CORIUM_RUNTIME_API symbols leave the shared object on ELF, matching the DLL export list.
+set_target_properties(Corium PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+)
 
 # AUTO follows _DEBUG (set by the debug CRT); ON/OFF pin it. Corium-scoped, so it never collides with a host's DEBUG.
 set(CORIUM_ENABLE_DEBUG_CHECKS AUTO CACHE STRING "Corium asserts: AUTO (follow _DEBUG), ON or OFF")
