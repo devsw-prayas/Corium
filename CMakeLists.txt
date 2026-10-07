@@ -5,14 +5,24 @@ if(NOT DEFINED CMAKE_VS_GLOBALS)
     set(CMAKE_VS_GLOBALS "VcpkgEnabled=false")
 endif()
 
-option(CORIUM_ENABLE_CUDA "Enable CUDA GPU backend" ON)
+project(Corium LANGUAGES CXX)
+
+# CUDA defaults to whatever the machine has, so a host without the toolkit still configures.
+include(CheckLanguage)
+check_language(CUDA)
+if (CMAKE_CUDA_COMPILER)
+    set(_corium_cuda_default ON)
+else()
+    set(_corium_cuda_default OFF)
+endif()
+option(CORIUM_ENABLE_CUDA "Enable CUDA GPU backend" ${_corium_cuda_default})
 option(CORIUM_BUILD_SHARED "Build Corium as a shared library (DLL/SO); OFF builds a static library" ON)
 
 if (CORIUM_ENABLE_CUDA)
-    project(Corium LANGUAGES CXX CUDA)
-    set(CMAKE_CUDA_ARCHITECTURES 80 86) # Supports only Ampere for now
-else()
-    project(Corium LANGUAGES CXX)
+    if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+        set(CMAKE_CUDA_ARCHITECTURES 80 86) # Supports only Ampere for now
+    endif()
+    enable_language(CUDA)
 endif()
 
 # cl.exe has no x64 inline asm, so the context switch is MASM there; clang-cl (compiler ID "Clang")
@@ -20,10 +30,6 @@ endif()
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     enable_language(ASM_MASM)
 endif()
-
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
@@ -70,6 +76,10 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES
     ${CORIUM_ASM}
     ${CORIUM_CUDA}
 )
+
+# PUBLIC: Corium's headers need C++20, so consumers get it too.
+target_compile_features(Corium PUBLIC cxx_std_20)
+set_target_properties(Corium PROPERTIES CXX_EXTENSIONS OFF)
 
 target_include_directories(Corium PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Public
@@ -128,15 +138,22 @@ else()
     target_compile_definitions(Corium PUBLIC CORIUM_FRAME_REG_BLOB_SIZE=80)
 endif()
 
-option(CORIUM_ENABLE_DEBUG_CHECKS "Enable Corium debug asserts/checks" ON)
-target_compile_definitions(Corium PUBLIC $<$<BOOL:${CORIUM_ENABLE_DEBUG_CHECKS}>:DEBUG>)
+# AUTO follows _DEBUG (set by the debug CRT); ON/OFF pin it. Corium-scoped, so it never collides with a host's DEBUG.
+set(CORIUM_ENABLE_DEBUG_CHECKS AUTO CACHE STRING "Corium asserts: AUTO (follow _DEBUG), ON or OFF")
+set_property(CACHE CORIUM_ENABLE_DEBUG_CHECKS PROPERTY STRINGS AUTO ON OFF)
+if (CORIUM_ENABLE_DEBUG_CHECKS STREQUAL "ON")
+    target_compile_definitions(Corium PUBLIC CORIUM_DEBUG_CHECKS=1)
+elseif (CORIUM_ENABLE_DEBUG_CHECKS STREQUAL "OFF")
+    target_compile_definitions(Corium PUBLIC CORIUM_DEBUG_CHECKS=0)
+endif()
 
 # Fiber-safe TLS: frames migrate between threads.
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     target_compile_options(Corium PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/GT>)
 endif()
 
-if (MSVC)
+# Only a standalone default: a host's CMAKE_MSVC_RUNTIME_LIBRARY knows its own config names and wins.
+if (MSVC AND NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
     set_property(TARGET Corium PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
     )

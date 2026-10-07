@@ -22,13 +22,15 @@
 #include <Corium.h>
 #include <CoriumCompiler.h>
 
-#if defined(_DEBUG) || defined(DEBUG)
+// CORIUM_DEBUG_CHECKS (0/1) comes from CORIUM_ENABLE_DEBUG_CHECKS=ON/OFF; unset (AUTO) follows _DEBUG.
+#if defined(CORIUM_DEBUG_CHECKS)
+#define CORIUM_BUILD_DEBUG CORIUM_DEBUG_CHECKS
+#elif defined(_DEBUG)
 #define CORIUM_BUILD_DEBUG 1
-#define CORIUM_BUILD_RELEASE 0
 #else
 #define CORIUM_BUILD_DEBUG 0
-#define CORIUM_BUILD_RELEASE 1
 #endif
+#define CORIUM_BUILD_RELEASE (!CORIUM_BUILD_DEBUG)
 
 // Asserts on a constant (e.g. `false && "msg"`) are intentional; MSVC flags them as C4127
 // when instantiated inside templates.
@@ -53,10 +55,11 @@
 #if CORIUM_BUILD_DEBUG
 #define CORIUM_ASSUME(expr) CORIUM_ASSERT(expr)
 #else
-#if CORIUM_COMPILER_MSVC
-#define CORIUM_ASSUME(expr) __assume(expr)
-#elif CORIUM_COMPILER_CLANG || CORIUM_COMPILER_GCC
+// Clang first: clang-cl also defines _MSC_VER, and __assume there discards side effects with -Wassume.
+#if CORIUM_COMPILER_CLANG || CORIUM_COMPILER_GCC
 #define CORIUM_ASSUME(expr) do { if (!(expr)) __builtin_unreachable(); } while (0)
+#elif CORIUM_COMPILER_MSVC
+#define CORIUM_ASSUME(expr) __assume(expr)
 #else
 #define CORIUM_ASSUME(expr) do { } while (0)
 #endif
