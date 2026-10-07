@@ -15,20 +15,19 @@ namespace Corium::Memory::Allocators {
 
 			if (newBump > m_Size) return nullptr;
 
-			const size_t prev = old;
-			m_Bump.compareExchange(
+			const size_t observed = m_Bump.compareExchange(
 				&old, newBump,
 				Core::Atomics::MemoryOrder::ACQ_REL,
 				Core::Atomics::MemoryOrder::RELAXED);
 
-			if (old == prev) {
+			if (observed == old) {
 				// CAS succeeded — commit page if needed, then return user pointer
 				if (!VirtualMemory::commitPageIfNeeded(*m_Base, newBump))
 					return nullptr;
 
 				return static_cast<uint8_t*>(m_Base->m_Memory) + aligned;
 			}
-			// CAS failed — old updated to current value, retry
+			old = observed;
 		}
 	}
 

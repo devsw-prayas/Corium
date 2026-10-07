@@ -168,7 +168,10 @@ namespace Corium::Core {
 			p_Loc->~T();
 		}
 		
-		void attach();
-		void detach();
+		// Adopts a foreign thread; counted, so pair every attach with a detach. v_TlsSize 0 = TLS min.
+		// The TLS slice is never reclaimed: attach once per thread lifetime, not per task.
+		CORIUM_NODISCARD CORIUM_RUNTIME_API bool attach(uint32_t v_NumaNode = 0, size_t v_TlsSize = 0) noexcept;
+
+		CORIUM_RUNTIME_API void detach() noexcept;
 	}
 }

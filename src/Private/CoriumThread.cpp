@@ -53,7 +53,7 @@ namespace Corium::Core {
 	struct alignas(64) RegistryEntry final {
 		HANDLE                          m_OsHandle{ INVALID_HANDLE_VALUE };
 		DWORD                           m_OsThreadId{ 0 };
-		CORIUM_MAYBE_UNUSED uint32_t    m_Pad0{ 0 };
+		uint32_t                        m_IsAdopted{ 0 };	// owned by this_thread::attach, not by a handle
 		uint64_t                        m_Generation{ 0 };
 		Atomic::AtomicValue64<uint64_t> m_TokenMask{};
 		Atomic::AtomicValue32<uint32_t> m_State{};
@@ -76,12 +76,9 @@ namespace Corium::Core {
 				// TODO: Linux (GCC/Clang __builtin_ctzll) implementation
 #endif
 
-				uint64_t desired = mask | (1ull << bit);
-				uint64_t previous = mask;
-				CORIUM_UNUSED(m_TokenMask.compareExchange(
-					&mask, desired,
-					MemoryOrder::ACQ_REL, MemoryOrder::ACQUIRE));
-				if (mask == previous) return static_cast<size_t>(bit);
+				const uint64_t desired = mask | (1ull << bit);
+				if (m_TokenMask.compareExchange(&mask, desired, MemoryOrder::ACQ_REL, MemoryOrder::ACQUIRE) == mask)
+					return static_cast<size_t>(bit);
 			}
 		}
 
@@ -89,12 +86,8 @@ namespace Corium::Core {
 			uint64_t bit = 1ull << v_Token;
 			for (;;) {
 				uint64_t mask = m_TokenMask.load(MemoryOrder::RELAXED);
-				uint64_t desired = mask & ~bit;
-				uint64_t previous = mask;
-				CORIUM_UNUSED(m_TokenMask.compareExchange(
-					&mask, desired,
-					MemoryOrder::ACQ_REL, MemoryOrder::ACQUIRE));
-				if (mask == previous) return;
+				const uint64_t desired = mask & ~bit;
+				if (m_TokenMask.compareExchange(&mask, desired, MemoryOrder::ACQ_REL, MemoryOrder::ACQUIRE) == mask) return;
 			}
 		}
 
@@ -124,14 +117,22 @@ namespace Corium::Core {
 		// Global thread registry — process-lifetime, zero-initialized.
 
 		RegistryEntry g_Registry[MAX_CORIUM_THREADS];
-		size_t findFreeSlot() noexcept {
+		// CAS claim so two creators can't take the same slot.
+		size_t claimFreeSlot() noexcept {
 			for (size_t i = 0; i < MAX_CORIUM_THREADS; ++i) {
-				if (g_Registry[i].state() == ThreadState::REAPED &&
-					!g_Registry[i].hasOutstandingTokens()) {
-					return i;
-				}
+				RegistryEntry& entry = g_Registry[i];
+				if (entry.state() != ThreadState::REAPED || entry.hasOutstandingTokens()) continue;
+
+				uint32_t expected = static_cast<uint32_t>(ThreadState::REAPED);
+				if (entry.m_State.compareExchange(&expected, static_cast<uint32_t>(ThreadState::CREATED),
+					MemoryOrder::ACQ_REL, MemoryOrder::ACQUIRE) == expected) return i;
 			}
 			return INVALID_SLOT;
+		}
+
+		void releaseSlot(RegistryEntry& r_Entry, size_t v_Token) noexcept {
+			r_Entry.releaseToken(v_Token);
+			r_Entry.setState(ThreadState::REAPED);
 		}
 	}
 
@@ -163,24 +164,29 @@ namespace Corium::Core {
 
 			// Per-thread state every Corium thread needs; runs on the thread itself. Shared by factory
 			// threads (the thunk) and, later, adopted foreign threads (this_thread::attach).
-			static void attachThreadState(size_t v_Slot, size_t v_TlsSize, Memory::Allocators::GeneralAllocator* p_Allocator) noexcept;
+			static bool attachThreadState(size_t v_Slot, size_t v_Token, size_t v_TlsSize,
+				Memory::Allocators::GeneralAllocator* p_Allocator) noexcept;
 			static void detachThreadState(size_t v_Slot) noexcept;
 		};
 	}
 
-	void Internal::ThreadLaunchHelper::attachThreadState(size_t v_Slot, size_t v_TlsSize,
+	bool Internal::ThreadLaunchHelper::attachThreadState(size_t v_Slot, size_t v_Token, size_t v_TlsSize,
 		Memory::Allocators::GeneralAllocator* p_Allocator) noexcept {
 		RegistryEntry& entry = g_Registry[v_Slot];
-		entry.setState(ThreadState::RUNNING);
+		const uint32_t numaNode = entry.m_NumaNode;
 
-		this_thread::t_Handle = ThreadHandle(v_Slot, entry.m_Generation, 0u, ThreadState::RUNNING);
+		// Null before initRuntime or for a missing node.
+		auto* tlsAllocator = Memory::Internal::AtomicAllocators::instance().s_TlsAllocator[numaNode].load(MemoryOrder::ACQUIRE);
+		if (!tlsAllocator) return false;
+		void* tlsMemory = tlsAllocator->allocate(v_TlsSize);
+		if (!tlsMemory) return false;
+		void* tlsSegmentMemory = p_Allocator->allocate(sizeof(Memory::VirtualSegment), alignof(Memory::VirtualSegment));
+		if (!tlsSegmentMemory) return false;
+
+		entry.setState(ThreadState::RUNNING);
+		this_thread::t_Handle = ThreadHandle(v_Slot, entry.m_Generation, v_Token, ThreadState::RUNNING);
 		this_thread::t_Permit = ParkHandle{ 0u };
 
-		const uint32_t numaNode = entry.m_NumaNode;
-		void* tlsMemory = Memory::Internal::AtomicAllocators::instance()
-			.s_TlsAllocator[numaNode].load(MemoryOrder::ACQUIRE)->allocate(v_TlsSize);
-
-		void* tlsSegmentMemory = p_Allocator->allocate(sizeof(Memory::VirtualSegment), alignof(Memory::VirtualSegment));
 		t_TlsSegment = p_Allocator->emplace<Memory::VirtualSegment>(
 			tlsSegmentMemory, tlsMemory, v_TlsSize, 0u, static_cast<uint8_t>(numaNode));
 		t_StateAllocator = p_Allocator;
@@ -191,6 +197,7 @@ namespace Corium::Core {
 		void* nativeContext = this_thread::t_ThreadLocalAllocator.allocate(Frame::kReservedHeaderSize, 64);
 		CORIUM_ASSERT(nativeContext != nullptr);
 		Frame::Internal::bindNativeContext(nativeContext, static_cast<uint8_t>(numaNode));
+		return true;
 	}
 
 	void Internal::ThreadLaunchHelper::detachThreadState(size_t v_Slot) noexcept {
@@ -201,13 +208,16 @@ namespace Corium::Core {
 		t_StateAllocator->deallocate(t_TlsSegment, sizeof(Memory::VirtualSegment));
 		t_TlsSegment = nullptr;
 		t_StateAllocator = nullptr;
+		this_thread::t_Handle = ThreadHandle::getInvalidThread();
 	}
 
 	DWORD WINAPI Internal::ThreadLaunchHelper::WinThreadThunk(void* p_Raw) noexcept {
 #ifdef _WIN32
 		auto* context = static_cast<LaunchContext*>(p_Raw);
 
-		attachThreadState(context->m_Slot, context->m_TlsSize, context->m_Allocator);
+		const bool attached = attachThreadState(context->m_Slot, 0u, context->m_TlsSize, context->m_Allocator);
+		CORIUM_ASSERT(attached && "TLS region exhausted or runtime not initialised");
+		CORIUM_UNUSED(attached);
 		context->m_Closure();
 		detachThreadState(context->m_Slot);
 
@@ -221,6 +231,100 @@ namespace Corium::Core {
 #endif
 	}
 
+	// this_thread::attach / detach
+	// Adopted slots keep m_OsHandle invalid so nothing but the owning thread can tear them down.
+
+	namespace {
+		thread_local uint32_t t_AttachCount = 0;
+		thread_local size_t   t_AdoptedSlot = INVALID_SLOT;
+		thread_local size_t   t_AdoptedToken = INVALID_SLOT;
+
+		void releaseAdoption() noexcept {
+			Internal::ThreadLaunchHelper::detachThreadState(t_AdoptedSlot);
+			RegistryEntry& entry = g_Registry[t_AdoptedSlot];
+			entry.m_OsThreadId = 0;
+			entry.m_IsAdopted = 0u;
+			releaseSlot(entry, t_AdoptedToken);
+			t_AdoptedSlot = INVALID_SLOT;
+			t_AdoptedToken = INVALID_SLOT;
+			t_AttachCount = 0;
+		}
+
+#ifdef _WIN32
+		// Releases the slot of a thread that exits without detaching.
+		void NTAPI onAdoptedThreadExit(void* p_Value) noexcept {
+			if (p_Value && t_AttachCount > 0) releaseAdoption();
+		}
+
+		DWORD adoptionFlsIndex() noexcept {
+			static const DWORD s_Index = FlsAlloc(onAdoptedThreadExit);
+			return s_Index;
+		}
+#endif
+	}
+
+	bool this_thread::attach(uint32_t v_NumaNode, size_t v_TlsSize) noexcept {
+		if (t_AttachCount > 0) {
+			++t_AttachCount;
+			return true;
+		}
+		if (t_TlsSegment != nullptr) return true;	// Corium-created thread
+
+		if (v_NumaNode >= Memory::Internal::MAX_NUMA_NODES) return false;
+		if (v_TlsSize == 0) v_TlsSize = CORIUM_SPACE_TLS_MIN_SIZE * 1_MiB;
+		if (v_TlsSize < CORIUM_SPACE_TLS_MIN_SIZE * 1_MiB || v_TlsSize > CORIUM_SPACE_TLS_MAX_SIZE * 1_MiB) return false;
+
+#ifdef _WIN32
+		const DWORD fls = adoptionFlsIndex();
+		if (fls == FLS_OUT_OF_INDEXES) return false;
+
+		const size_t slot = claimFreeSlot();
+		if (slot == INVALID_SLOT) return false;	
+
+		RegistryEntry& entry = g_Registry[slot];
+		const size_t token = entry.allocateToken();
+		if (token == INVALID_SLOT) {
+			entry.setState(ThreadState::REAPED);
+			return false;
+		}
+
+		++entry.m_Generation;
+		entry.m_NumaNode = v_NumaNode;
+		entry.m_IsAdopted = 1u;
+		entry.m_OsHandle = INVALID_HANDLE_VALUE;
+		entry.m_OsThreadId = GetCurrentThreadId();
+
+		if (!Internal::ThreadLaunchHelper::attachThreadState(slot, token, v_TlsSize,
+				&Memory::Internal::AllocatorRegistry::s_GeneralAllocator[0])) {
+			entry.m_OsThreadId = 0;
+			entry.m_IsAdopted = 0u;
+			releaseSlot(entry, token);
+			return false;
+		}
+
+		t_AdoptedSlot = slot;
+		t_AdoptedToken = token;
+		t_AttachCount = 1;
+		FlsSetValue(fls, reinterpret_cast<void*>(1));
+		return true;
+#else
+		// TODO: Linux (pthread_key destructor in place of FLS)
+		return false;
+#endif
+	}
+
+	void this_thread::detach() noexcept {
+		if (t_AttachCount == 0) return;
+		CORIUM_ASSERT(Frame::this_thread::currentFrame() == std::addressof(Frame::this_thread::nativeContext())
+			&& "detach must run on the native context, not inside a frame");
+		if (--t_AttachCount > 0) return;
+
+#ifdef _WIN32
+		FlsSetValue(adoptionFlsIndex(), nullptr);
+#endif
+		releaseAdoption();
+	}
+
 	// NativeThread — method implementations
 
 	ThreadHandle NativeThread::createThread(ThreadLaunchDesc&& u_LaunchDesc, const ThreadAttrDesc& ro_ExecDesc) noexcept {
@@ -229,13 +333,21 @@ namespace Corium::Core {
 		CORIUM_ASSERT(ro_ExecDesc.m_State == DescriptorState::FROZEN
 			&& "ThreadAttrDesc must be validated (call validate()) before createThread");
 
-		const size_t slot = findFreeSlot();
+		const size_t slot = claimFreeSlot();
 		if (slot == INVALID_SLOT) return ThreadHandle::getInvalidThread();
 
 		RegistryEntry& entry = g_Registry[slot];
 
 		const size_t token = entry.allocateToken();
-		if (token == INVALID_SLOT) return ThreadHandle::getInvalidThread();
+		if (token == INVALID_SLOT) {
+			entry.setState(ThreadState::REAPED);
+			return ThreadHandle::getInvalidThread();
+		}
+
+		// Written before launch: the thread reads them in attachThreadState.
+		++entry.m_Generation;
+		entry.m_NumaNode = ro_ExecDesc.m_NumaNode;
+		entry.m_IsAdopted = 0u;
 
 		auto* allocator = &Memory::Internal::AllocatorRegistry::s_GeneralAllocator[0];
 
@@ -248,7 +360,7 @@ namespace Corium::Core {
 			u_LaunchDesc.m_VaSize) : nullptr;
 
 		if (!context) {
-			entry.releaseToken(token);
+			releaseSlot(entry, token);
 			return ThreadHandle::getInvalidThread();
 		}
 
@@ -268,7 +380,7 @@ namespace Corium::Core {
 			if (!attrListBuf) {
 				context->~LaunchContext();
 				allocator->deallocate(context, sizeof(LaunchContext));
-				entry.releaseToken(token);
+				releaseSlot(entry, token);
 				return ThreadHandle::getInvalidThread();
 			}
 			attrList = static_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attrListBuf);
@@ -309,7 +421,7 @@ namespace Corium::Core {
 		if (!osHandle || osHandle == INVALID_HANDLE_VALUE) {
 			context->~LaunchContext();
 			allocator->deallocate(context, sizeof(LaunchContext));
-			entry.releaseToken(token);
+			releaseSlot(entry, token);
 			return ThreadHandle::getInvalidThread();
 		}
 
@@ -328,9 +440,6 @@ namespace Corium::Core {
 		// Commit registry entry.
 		entry.m_OsHandle = osHandle;
 		entry.m_OsThreadId = osThreadId;
-		entry.m_NumaNode = ro_ExecDesc.m_NumaNode;
-		++entry.m_Generation;
-		entry.setState(ThreadState::CREATED);
 
 		// Perfrom cleanup
 
@@ -338,7 +447,7 @@ namespace Corium::Core {
 		// TODO: Linux (pthreads) implementation
 		context->~LaunchContext();
 		allocator->deallocate(context, sizeof(LaunchContext));
-		entry.releaseToken(token);
+		releaseSlot(entry, token);
 		return ThreadHandle::getInvalidThread();
 #endif
 
@@ -349,6 +458,7 @@ namespace Corium::Core {
 	bool NativeThread::detachThread(const ThreadHandle& ro_Handle) noexcept {
 		if (!isValidHandle(ro_Handle)) return false;
 		RegistryEntry& entry = g_Registry[ro_Handle.m_ThreadId];
+		if (entry.m_IsAdopted) return false;
 
 		entry.releaseToken(ro_Handle.m_AccessToken);
 
@@ -369,6 +479,7 @@ namespace Corium::Core {
 	bool NativeThread::closeHandle(const ThreadHandle& ro_Handle) noexcept {
 		if (!isValidHandle(ro_Handle)) return false;
 		RegistryEntry& entry = g_Registry[ro_Handle.m_ThreadId];
+		if (entry.m_IsAdopted) return false;
 
 		entry.releaseToken(ro_Handle.m_AccessToken);
 

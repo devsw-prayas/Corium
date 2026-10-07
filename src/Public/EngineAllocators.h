@@ -105,8 +105,9 @@ namespace Corium::Memory::Allocators {
 			Core::Atomic::AtomicValue32<uint32_t>& m_Lock;
 			explicit LockGuard(Core::Atomic::AtomicValue32<uint32_t>& r_Lock) : m_Lock(r_Lock) {
 				uint32_t expected = 0;
-				while (!m_Lock.compareExchange(&expected, 1u,
-					Core::Atomics::MemoryOrder::ACQUIRE, Core::Atomics::MemoryOrder::RELAXED)) {
+				// compareExchange returns the observed value, so 0 means acquired.
+				while (m_Lock.compareExchange(&expected, 1u,
+					Core::Atomics::MemoryOrder::ACQUIRE, Core::Atomics::MemoryOrder::RELAXED) != 0u) {
 					expected = 0;
 					Corium::Intrinsic::Pause();
 				}

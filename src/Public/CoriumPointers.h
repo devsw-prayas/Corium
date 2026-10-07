@@ -182,12 +182,12 @@ namespace Corium::Memory {
 			bool tryAddRef() noexcept {
 				uint64_t cur = m_StrongCount.load(MemoryOrder::ACQUIRE);
 				while (cur != 0u) {
-					uint64_t previous = cur;
-					CORIUM_UNUSED(m_StrongCount.compareExchange(
+					const uint64_t observed = m_StrongCount.compareExchange(
 						&cur, cur + 1u,
 						MemoryOrder::ACQ_REL,
-						MemoryOrder::ACQUIRE));
-					if (cur == previous) return true;
+						MemoryOrder::ACQUIRE);
+					if (observed == cur) return true;
+					cur = observed;
 				}
 				return false;
 			}
