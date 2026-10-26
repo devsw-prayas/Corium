@@ -7,7 +7,7 @@
 namespace Corium::Core::Frame {
 	using FrameEntry = Utils::ClosureFunction<Memory::Allocators::ClosureAllocator, void()>;
 
-	namespace this_thread {
+	namespace this_frame {
 		CORIUM_RUNTIME_API void captureFrame(FrameHandle* p_Incoming);
 		CORIUM_RUNTIME_API FrameHandle& nativeContext();
 		// Frame currently executing on this thread (the native context when no frame is running).

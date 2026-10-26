@@ -315,7 +315,7 @@ namespace Corium::Core {
 
 	void this_thread::detach() noexcept {
 		if (t_AttachCount == 0) return;
-		CORIUM_ASSERT(Frame::this_thread::currentFrame() == std::addressof(Frame::this_thread::nativeContext())
+		CORIUM_ASSERT(Frame::this_frame::currentFrame() == std::addressof(Frame::this_frame::nativeContext())
 			&& "detach must run on the native context, not inside a frame");
 		if (--t_AttachCount > 0) return;
 

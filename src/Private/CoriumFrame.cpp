@@ -19,12 +19,12 @@ namespace Corium::Core::Frame {
 		thread_local FrameHandle* t_PendingSuspend = nullptr;
 	}
 
-	CORIUM_NOINLINE FrameHandle& this_thread::nativeContext() {
+	CORIUM_NOINLINE FrameHandle& this_frame::nativeContext() {
 		CORIUM_ASSERT(t_NativeContext != nullptr && "thread is not attached to Corium");
 		return *t_NativeContext;
 	}
 
-	CORIUM_NOINLINE FrameHandle* this_thread::currentFrame() {
+	CORIUM_NOINLINE FrameHandle* this_frame::currentFrame() {
 		return t_CurrentFrame;
 	}
 
@@ -117,8 +117,8 @@ namespace Corium::Core::Frame {
 		}
 	}
 
-	bool this_thread::tryCaptureFrame(FrameHandle* p_Incoming) {
-		auto* self = this_thread::currentFrame();
+	bool this_frame::tryCaptureFrame(FrameHandle* p_Incoming) {
+		auto* self = this_frame::currentFrame();
 		CORIUM_ASSERT(self != p_Incoming && "Cannot capture a frame already held by the thread");
 		CORIUM_ASSERT((!p_Incoming->m_IsNative || p_Incoming == t_NativeContext) && "Native contexts never migrate");
 
@@ -136,7 +136,7 @@ namespace Corium::Core::Frame {
 		return true;
 	}
 
-	void this_thread::captureFrame(FrameHandle* p_Incoming) {
+	void this_frame::captureFrame(FrameHandle* p_Incoming) {
 		const bool captured = tryCaptureFrame(p_Incoming);
 		CORIUM_ASSERT(captured && "Incoming frame must be READY or SUSPENDED and unclaimed");
 	}
@@ -246,20 +246,20 @@ namespace Corium::Core::Frame {
 	}
 
 	bool NativeFrame::trySwitchTo(FrameHandle* p_Self, FrameHandle* p_Target, bool v_Terminate) {
-		CORIUM_ASSERT(p_Self == this_thread::currentFrame() && "switchTo must be called by the frame that is running");
+		CORIUM_ASSERT(p_Self == this_frame::currentFrame() && "switchTo must be called by the frame that is running");
 		// Self's memory is untouchable until execution has left it, so the landing side (afterSwitch) finishes the job.
 		if (v_Terminate) t_PendingReclaim = p_Self;
-		return this_thread::tryCaptureFrame(p_Target);
+		return this_frame::tryCaptureFrame(p_Target);
 	}
 
 	void NativeFrame::yieldToNative(FrameHandle* p_Self, bool v_Terminate) {
 		// FrameHandle deletes operator&, so the native context's address comes from addressof.
-		switchTo(p_Self, std::addressof(this_thread::nativeContext()), v_Terminate);
+		switchTo(p_Self, std::addressof(this_frame::nativeContext()), v_Terminate);
 	}
 
 	void NativeFrame::killFrame(const FrameHandle* p_Target) {
 		CORIUM_ASSERT(p_Target != nullptr);
-		CORIUM_ASSERT(p_Target != this_thread::currentFrame() && "Cannot kill the frame that is running");
+		CORIUM_ASSERT(p_Target != this_frame::currentFrame() && "Cannot kill the frame that is running");
 		CORIUM_ASSERT(!p_Target->m_IsNative && "Cannot kill a thread's native context");
 		CORIUM_ASSERT(p_Target->m_State != FrameState::RUNNING && "Cannot kill a running frame");
 
