@@ -41,7 +41,7 @@ cmake --build . --config Release
 |---|---|---|
 | `CORIUM_ENABLE_CUDA` | `ON` | Builds the CUDA GPU backend under `src/Cuda/`. |
 | `CORIUM_BUILD_SHARED` | `ON` | Builds Corium as a shared library (DLL/SO). `OFF` builds a static library — the same headers work unchanged either way. |
-| `CORIUM_ENABLE_DEBUG_CHECKS` | `ON` | Enables `CORIUM_ASSERT`/`CORIUM_DEBUG_ASSERT`. |
+| `CORIUM_ENABLE_DEBUG_CHECKS` | `AUTO` | Controls `CORIUM_ASSERT`/`CORIUM_DEBUG_ASSERT`. `AUTO` follows `_DEBUG`; `ON`/`OFF` force them on or off. |
 
 ### As part of SpectraRenderer
 
@@ -113,15 +113,135 @@ ThreadHandle handle = NativeThread::createThread(std::move(launchDesc), attrDesc
 
 ## Thread-local storage
 
-Every thread launched through Corium gets a dedicated bump-allocated TLS arena, reclaimed automatically on thread exit:
+Every thread launched through Corium gets a dedicated bump-allocated TLS arena, reclaimed as a whole on thread exit:
 
 ```cpp
 using namespace Corium::Core;
 
 MyObject* obj = this_thread::create<MyObject>(/* ctor args */);
 // ...
-this_thread::destroy(obj);
+this_thread::destroy(obj); // runs the destructor; the memory goes back with the arena
 ```
+
+### Foreign threads
+
+Threads Corium did not launch (the main thread, threads from another library) must be adopted before they use TLS, sync primitives or frames:
+
+```cpp
+if (Corium::Core::this_thread::attach(/* NUMA node */ 0u)) {
+    // ...
+    Corium::Core::this_thread::detach();
+}
+```
+
+Attach is counted, so pair every `attach` with a `detach`. The TLS slice is never reclaimed: attach once per thread lifetime, not once per task.
+
+## Frames (user-mode context switching)
+
+`Corium::Core::Frame::NativeFrame` runs closures on their own stacks and switches between them cooperatively on the same thread.
+
+```cpp
+#include <CoriumFrame.h>
+
+using namespace Corium::Core::Frame;
+
+FrameStackDesc desc{};
+init(desc);
+setStackSize(desc, 256 * 1024); // 64 KiB .. 8 MiB
+setNumaNode(desc, 0u);
+validate(desc);                // freezes the desc; createFrame requires a frozen desc
+
+auto frame = NativeFrame::createFrame(FrameEntry{ /* closure */ }, desc);
+if (frame) {
+    this_frame::captureFrame(*frame);   // runs until the frame yields or terminates
+}
+```
+
+| Call | Effect |
+|---|---|
+| `switchTo` / `trySwitchTo` | Switch from one frame to another (`try` fails instead of switching when the target can't be claimed). |
+| `yieldToNative` | Return to the thread's native context, optionally terminating the frame. |
+| `killFrame` | Wipe a suspended frame and leave a blank `TERMINATED` handle. It is never resumed. |
+| `this_frame::currentFrame` | The frame running on this thread. Closures take no arguments, so this is how a frame finds itself. |
+
+## Synchronization
+
+`Corium::Runtime::Sync` provides `java.util.concurrent`-style primitives built on wait-on-address (`ParkHandle`), not kernel objects:
+
+| Primitive | Use |
+|---|---|
+| `CountDownLatch` | Wait until N events have happened. |
+| `CyclicBarrier` | N parties meet at a reusable rendezvous point. |
+| `Semaphore` | Counting permits. |
+| `CriticalSection` | OS-backed recursive mutex. No timed lock. |
+| `ReentrantLock` | Custom recursive lock with timed `tryLock`. |
+| `ReadWriteLock` | Many readers or one writer. |
+| `StampedLock` | Read-write lock with optimistic, non-blocking reads (`tryOptimisticRead` + `validate`). |
+| `Phaser` | Dynamic-party, multi-phase barrier. |
+| `Condition` | Condition variable. |
+| `Exchanger` | Two threads swap values. |
+
+Every blocking call has a deadline overload that takes a `Chrono::Instant`:
+
+```cpp
+#include <CoriumSync.h>
+
+using namespace Corium::Core::Chrono::Literals;
+
+Corium::Runtime::Sync::CountDownLatch latch(4);
+// workers call latch.countDown();
+bool done = latch.await(Corium::Core::Chrono::until(500_ms));
+```
+
+## Time
+
+`Corium::Core::Chrono` holds nanosecond-resolution `Interval` (a duration) and `Instant` (a monotonic point in time). Create an `Instant` with `MonotonicClock::now()` or `until(interval)`. The `Literals` namespace provides `_ns`, `_us`, `_ms`, `_s` and `_min`.
+
+## Atomics
+
+Corium uses its own atomics in place of `<atomic>`, with MSVC and GCC/Clang intrinsic backends:
+
+- `Corium::Atomics::AtomicValue<T>` wraps any 1-, 2-, 4- or 8-byte word, with no padding (`sizeof(AtomicValue<T>) == sizeof(T)`). The memory order is a template argument, checked at compile time against what the operation allows:
+  ```cpp
+  Corium::Atomics::AtomicValue<uint32_t> counter{ 0 };
+  using Corium::Atomics::MemoryOrder;
+  counter.fetchAdd<MemoryOrder::RELAXED>(1);
+  uint32_t v = counter.load<MemoryOrder::ACQUIRE>();
+  ```
+- `Corium::Core::Atomic::AtomicValue32` / `AtomicValue64` / `AtomicPointer` are fixed-width variants used throughout the runtime.
+
+## Smart pointers
+
+`Corium::Memory` provides allocator-aware ownership types. None of them call `new`/`delete`:
+
+| Type | Notes |
+|---|---|
+| `UniquePtr<T, TAllocator>` | Sole owner. `view()` hands out a non-owning `UniqueView<T>`. |
+| `SharedPtr<T, TAllocator>` | Ref-counted. Create with `make(objAlloc, ctrlAlloc, args...)` or `adopt(ptr, objAlloc, ctrlAlloc)`. Control blocks always come from `ControlBlockAllocator`. |
+| `WeakPtr<T, TAllocator>` | Non-owning. `lock()` returns a `SharedPtr` if the object is still alive. |
+
+`TAllocator` defaults to `GeneralAllocator`.
+
+## Task pipeline
+
+`Corium::Execution` is the task system. It is in progress:
+
+- **Inductor** (`Inductor.h`): describes tasks and their memory (`TaskDesc`, `TaskMemoryDesc`). Done.
+- **Builder** (`Builder.h`): `TaskBuilder` assembles tasks into a pipeline. Done.
+- **Executor**: not started yet.
+
+`ChaseLevDeque.h` provides the work-stealing deque that the executor will build on.
+
+## CUDA
+
+With `CORIUM_ENABLE_CUDA=ON`, `src/Cuda/` provides thin RAII wrappers over the CUDA driver API:
+
+| Header | Covers |
+|---|---|
+| `CudaBootstrap.h` | Driver init (`CudaDriver::initCuda`) and device queries (`CudaDeviceManager`). |
+| `CudaContextManager.h` | Contexts. |
+| `CudaDeviceMemory.h`, `CudaPinnedMemory.h`, `CudaVirtualMemory.h` | Device, pinned host and virtual-memory allocations. |
+| `CudaStream.h`, `CudaEvent.h`, `CudaGraph.h` | Streams, events and graphs. |
 
 ## License
 
