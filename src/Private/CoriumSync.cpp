@@ -70,57 +70,81 @@ namespace Corium::Runtime::Sync {
 	}
 
 	CyclicBarrier::CyclicBarrier(uint32_t v_Parties)
-		: m_Generation(0), m_Parties(v_Parties), m_Remaining(v_Parties), m_IsBroken(false) {
+		: m_Generation(0), m_Parties(v_Parties), m_Remaining(v_Parties), m_IsBroken(false), m_BrokenGeneration(0) {
+	}
+
+	// Only one breaker per generation: the CAS on the generation picks it, so the count moves once.
+	bool CyclicBarrier::breakGeneration(uint32_t v_Generation) noexcept {
+		uint32_t expected = v_Generation;
+		if (m_Generation.m_ParkingPermit.compareExchange(&expected, v_Generation + 1,
+			Core::Atomics::MemoryOrder::ACQ_REL, Core::Atomics::MemoryOrder::RELAXED) != v_Generation)
+			return false;
+		m_BrokenGeneration.store(v_Generation + 1, Core::Atomics::MemoryOrder::RELEASE);
+		m_IsBroken.store(true, Core::Atomics::MemoryOrder::RELEASE);
+		Core::ParkingSupport support(&m_Generation);
+		Core::NativeThread::wakeAllOnAddress(support);
+		return true;
+	}
+
+	bool CyclicBarrier::wasBroken(uint32_t v_Generation) const noexcept {
+		return m_BrokenGeneration.load(Core::Atomics::MemoryOrder::ACQUIRE) == v_Generation + 1;
 	}
 
 	uint32_t CyclicBarrier::await() {
-		uint32_t gen = m_Generation.m_ParkingPermit.load(Core::Atomics::MemoryOrder::ACQUIRE);
-		uint32_t rem = m_Remaining.decrement(Core::Atomics::MemoryOrder::ACQ_REL);
+		const uint32_t gen = m_Generation.m_ParkingPermit.load(Core::Atomics::MemoryOrder::ACQUIRE);
+		if (isBroken()) return BROKEN;
+		const uint32_t rem = m_Remaining.decrement(Core::Atomics::MemoryOrder::ACQ_REL);
 		Core::ParkingSupport support(&m_Generation);
 
 		if (rem == 0) {
+			if (isBroken()) return BROKEN;
 			m_Remaining.store(m_Parties, Core::Atomics::MemoryOrder::RELEASE);
-			m_Generation.m_ParkingPermit.increment(Core::Atomics::MemoryOrder::ACQ_REL);
+			uint32_t expected = gen;
+			if (m_Generation.m_ParkingPermit.compareExchange(&expected, gen + 1,
+				Core::Atomics::MemoryOrder::ACQ_REL, Core::Atomics::MemoryOrder::RELAXED) != gen)
+				return BROKEN;
 			Core::NativeThread::wakeAllOnAddress(support);
-			m_IsBroken.store(false, Core::Atomics::MemoryOrder::RELEASE); // heal any prior break
 			return 0;
 		}
 
-		while (m_Generation.m_ParkingPermit.load(Core::Atomics::MemoryOrder::ACQUIRE) == gen && !isBroken())
+		while (m_Generation.m_ParkingPermit.load(Core::Atomics::MemoryOrder::ACQUIRE) == gen)
 			Core::NativeThread::waitOnAddress(support, gen);
-		return 0;
+		return wasBroken(gen) ? BROKEN : rem;
 	}
 
 	bool CyclicBarrier::await(Chrono::Instant v_Deadline) {
-		uint32_t gen = m_Generation.m_ParkingPermit.load(Core::Atomics::MemoryOrder::ACQUIRE);
-		uint32_t rem = m_Remaining.decrement(Core::Atomics::MemoryOrder::ACQ_REL);
+		const uint32_t gen = m_Generation.m_ParkingPermit.load(Core::Atomics::MemoryOrder::ACQUIRE);
+		if (isBroken()) return false;
+		const uint32_t rem = m_Remaining.decrement(Core::Atomics::MemoryOrder::ACQ_REL);
 		Core::ParkingSupport support(&m_Generation);
 
 		if (rem == 0) {
+			if (isBroken()) return false;
 			m_Remaining.store(m_Parties, Core::Atomics::MemoryOrder::RELEASE);
-			m_Generation.m_ParkingPermit.increment(Core::Atomics::MemoryOrder::ACQ_REL);
+			uint32_t expected = gen;
+			if (m_Generation.m_ParkingPermit.compareExchange(&expected, gen + 1,
+				Core::Atomics::MemoryOrder::ACQ_REL, Core::Atomics::MemoryOrder::RELAXED) != gen)
+				return false;
 			Core::NativeThread::wakeAllOnAddress(support);
-			m_IsBroken.store(false, Core::Atomics::MemoryOrder::RELEASE);
 			return true;
 		}
 
-		while (m_Generation.m_ParkingPermit.load(Core::Atomics::MemoryOrder::ACQUIRE) == gen && !isBroken()) {
+		while (m_Generation.m_ParkingPermit.load(Core::Atomics::MemoryOrder::ACQUIRE) == gen) {
 			if (v_Deadline.isExpired()) {
-				m_IsBroken.store(true, Core::Atomics::MemoryOrder::RELEASE);
-				// Bump the generation too: untimed parties park on it, and a break that leaves it unchanged
-				// lands between their isBroken() check and their park and never wakes them.
-				m_Generation.m_ParkingPermit.increment(Core::Atomics::MemoryOrder::ACQ_REL);
-				Core::NativeThread::wakeAllOnAddress(support);
-				return false;
+				CORIUM_UNUSED(breakGeneration(gen));
+				break;
 			}
 			Core::NativeThread::waitOnAddressFor(support, v_Deadline, gen);
 		}
-		return !isBroken();
+		return !wasBroken(gen);
 	}
 
+	// Breaks the waiters of the current generation, then starts a fresh, unbroken one.
 	void CyclicBarrier::reset() {
+		const uint32_t gen = m_Generation.m_ParkingPermit.load(Core::Atomics::MemoryOrder::ACQUIRE);
+		m_BrokenGeneration.store(gen + 1, Core::Atomics::MemoryOrder::RELEASE);
 		m_Remaining.store(m_Parties, Core::Atomics::MemoryOrder::RELEASE);
-		m_IsBroken.store(true, Core::Atomics::MemoryOrder::RELEASE); // await()'s rem==0 branch heals this
+		m_IsBroken.store(false, Core::Atomics::MemoryOrder::RELEASE);
 		m_Generation.m_ParkingPermit.increment(Core::Atomics::MemoryOrder::ACQ_REL);
 		Core::ParkingSupport support(&m_Generation);
 		Core::NativeThread::wakeAllOnAddress(support);

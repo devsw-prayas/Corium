@@ -3,6 +3,7 @@
 #include "ThreadUtils.h"
 #include "CoriumChrono.h"
 #include "CoriumThread.h"
+#include <memory>
 
 // Some of my favorites from java.util.concurrent now in C++!
 // I'm lazy to fix some bugs, once that's done I'll add the TODOS :)
@@ -29,17 +30,27 @@ namespace Corium::Runtime::Sync {
 		uint32_t getCount() const;
 	};
 
+	// Java semantics: a timeout or reset() breaks the current generation. A broken barrier stays broken,
+	// and every await() returns BROKEN, until reset() starts a fresh generation.
 	class CORIUM_RUNTIME_API CyclicBarrier final {
 		Core::ParkHandle m_Generation;
 		const uint32_t m_Parties;
 		Core::Atomic::AtomicValue32<uint32_t> m_Remaining;
 		Core::Atomic::AtomicValue32<bool> m_IsBroken;
+		// Generation + 1 of the last generation that was broken (0 = none), so released waiters can tell why.
+		Core::Atomic::AtomicValue32<uint32_t> m_BrokenGeneration;
+
+		bool breakGeneration(uint32_t v_Generation) noexcept;
+		bool wasBroken(uint32_t v_Generation) const noexcept;
 	public:
+		static constexpr uint32_t BROKEN = UINT32_MAX;
+
 		explicit CyclicBarrier(uint32_t v_Parties);
 
 		CyclicBarrier(const CyclicBarrier&) = delete;
 		CyclicBarrier& operator=(const CyclicBarrier&) = delete;
 
+		// Arrival index (getParties() - 1 for the first to arrive, 0 for the last), or BROKEN.
 		uint32_t await();
 		bool await(Chrono::Instant v_Deadline);
 		void reset();
@@ -257,18 +268,28 @@ namespace Corium::Runtime::Sync {
 			return static_cast<uint32_t>((address >> 6) % m_SlotCount);
 		}
 
+		// Constructs into raw storage for the untimed exchange, assigns into the caller's object for the timed one.
+		struct ResultSink {
+			T* m_pOut;
+			bool m_Construct;
+			void deliver(T&& u_Value) {
+				if (m_Construct) new (m_pOut) T(std::move(u_Value));
+				else *m_pOut = std::move(u_Value);
+			}
+		};
+
 		CORIUM_FORCEINLINE static bool transition(Slot& r_Slot, uint32_t v_From, uint32_t v_To) noexcept {
 			uint32_t expected = v_From;
 			return r_Slot.m_State.compareExchange(&expected, v_To,
 				Core::Atomics::MemoryOrder::ACQ_REL, Core::Atomics::MemoryOrder::RELAXED) == v_From;
 		}
 
-		bool tryFulfill(uint32_t v_Start, T& r_Value, T& ro_Result) {
+		bool tryFulfill(uint32_t v_Start, T& r_Value, ResultSink& r_Sink) {
 			for (uint32_t i = 0; i < m_SlotCount; ++i) {
 				Slot& slot = m_pSlots[(v_Start + i) % m_SlotCount];
 				if (!transition(slot, SLOT_WAITING, SLOT_TAKING)) continue;
 				T* waiter = reinterpret_cast<T*>(slot.m_WaiterBuf);
-				ro_Result = std::move(*waiter);
+				r_Sink.deliver(std::move(*waiter));
 				waiter->~T();
 				new (slot.m_FulfillerBuf) T(std::move(r_Value));
 				slot.m_State.store(SLOT_FULFILLED, Core::Atomics::MemoryOrder::RELEASE);
@@ -280,9 +301,9 @@ namespace Corium::Runtime::Sync {
 			return false;
 		}
 
-		void collect(Slot& r_Slot, T& ro_Result) {
+		void collect(Slot& r_Slot, ResultSink& r_Sink) {
 			T* fulfiller = reinterpret_cast<T*>(r_Slot.m_FulfillerBuf);
-			ro_Result = std::move(*fulfiller);
+			r_Sink.deliver(std::move(*fulfiller));
 			fulfiller->~T();
 			r_Slot.m_State.store(SLOT_EMPTY, Core::Atomics::MemoryOrder::RELEASE);
 		}
@@ -318,7 +339,7 @@ namespace Corium::Runtime::Sync {
 		}
 
 		// TIMED_OUT and RETRY both mean the offer was withdrawn and r_Value holds the value again.
-		Outcome awaitPartner(Slot& r_Slot, T& r_Value, T& ro_Result, const Chrono::Instant* p_Deadline) {
+		Outcome awaitPartner(Slot& r_Slot, T& r_Value, ResultSink& r_Sink, const Chrono::Instant* p_Deadline) {
 			Core::ParkingSupport support(&r_Slot.m_Gate);
 			for (;;) {
 				const uint32_t gate = r_Slot.m_Gate.m_ParkingPermit.load(Core::Atomics::MemoryOrder::ACQUIRE);
@@ -339,15 +360,15 @@ namespace Corium::Runtime::Sync {
 				if (p_Deadline) Core::NativeThread::waitOnAddressFor(support, *p_Deadline, gate);
 				else Core::NativeThread::waitOnAddress(support, gate);
 			}
-			collect(r_Slot, ro_Result);
+			collect(r_Slot, r_Sink);
 			return Outcome::EXCHANGED;
 		}
 
-		bool exchangeImpl(T& r_Value, T& ro_Result, const Chrono::Instant* p_Deadline) {
+		bool exchangeImpl(T& r_Value, ResultSink& r_Sink, const Chrono::Instant* p_Deadline) {
 			const uint32_t start = pickSlot();
 			for (;;) {
 				// Retried every round: a partner may have published WAITING after our last scan.
-				if (tryFulfill(start, r_Value, ro_Result)) return true;
+				if (tryFulfill(start, r_Value, r_Sink)) return true;
 				if (p_Deadline && p_Deadline->isExpired()) return false;
 				Slot& slot = m_pSlots[start];
 				if (transition(slot, SLOT_EMPTY, SLOT_FILLING)) {
@@ -355,7 +376,7 @@ namespace Corium::Runtime::Sync {
 					// SEQ_CST, paired with the SEQ_CST loads in scanOtherWaiters: two waiters each publish then read the
 					// other slot, and under release/acquire x86 may let both reads pass both stores, so both park.
 					slot.m_State.store(SLOT_WAITING, Core::Atomics::MemoryOrder::SEQ_CST);
-					const Outcome outcome = awaitPartner(slot, r_Value, ro_Result, p_Deadline);
+					const Outcome outcome = awaitPartner(slot, r_Value, r_Sink, p_Deadline);
 					if (outcome != Outcome::RETRY) return outcome == Outcome::EXCHANGED;
 				}
 				Intrinsic::Pause();
@@ -385,15 +406,21 @@ namespace Corium::Runtime::Sync {
 		Exchanger(Exchanger&&) = delete;
 		Exchanger& operator=(Exchanger&&) = delete;
 
+		// Only needs T to be move-constructible: the result is built in raw storage, not assigned into a default T.
 		T exchange(T&& v_Value) {
-			T result{};
-			CORIUM_UNUSED(exchangeImpl(v_Value, result, nullptr));
+			alignas(T) uint8_t storage[sizeof(T)];
+			T* received = reinterpret_cast<T*>(storage);
+			ResultSink sink{ received, true };
+			CORIUM_UNUSED(exchangeImpl(v_Value, sink, nullptr));
+			T result(std::move(*received));
+			received->~T();
 			return result;
 		}
 
 		// On timeout v_Value is handed back intact, since no partner took it.
 		bool exchange(T&& v_Value, T& ro_Result, Chrono::Instant v_Deadline) {
-			return exchangeImpl(v_Value, ro_Result, &v_Deadline);
+			ResultSink sink{ std::addressof(ro_Result), false };
+			return exchangeImpl(v_Value, sink, &v_Deadline);
 		}
 	};
 }
