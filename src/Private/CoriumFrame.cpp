@@ -50,10 +50,11 @@ namespace Corium::Core::Frame {
 		// Back to the node's frame allocator. The guard page is lifted first: the allocator threads its own bookkeeping
 		// through freed memory, and whoever receives the block next would fault on it. Lifting is harmless on a block
 		// that never had a guard; if it fails, leaking the block beats handing out a trap page.
-		void releasePoolBlock(const FrameHandle* p_Dead) noexcept {
-			auto* base = static_cast<uint8_t*>(p_Dead->m_StackPtr);
-			const size_t size = p_Dead->m_StackSize;
-			auto* allocator = Memory::Internal::AtomicAllocators::instance().s_FrameAllocator[p_Dead->m_NumaNode].load(Core::Atomics::MemoryOrder::ACQUIRE);
+		// Takes the block by value: the handle lives inside the block and may already be gone.
+		void releasePoolBlock(void* p_Base, size_t v_Size, uint8_t v_NumaNode) noexcept {
+			auto* base = static_cast<uint8_t*>(p_Base);
+			const size_t size = v_Size;
+			auto* allocator = Memory::Internal::AtomicAllocators::instance().s_FrameAllocator[v_NumaNode].load(Core::Atomics::MemoryOrder::ACQUIRE);
 
 			const bool lifted = Memory::VirtualMemory::unprotectMem(Memory::createSegment({ base + ::Corium::Memory::PAGE_SIZE, ::Corium::Memory::PAGE_SIZE }));
 			CORIUM_ASSERT(lifted && "Could not lift the guard page");
@@ -93,11 +94,18 @@ namespace Corium::Core::Frame {
 			// Before TERMINATED is published: an owner seeing it may reuse the block, slot included.
 			destroyEntry(dead);
 
+			// Snapshot first: once TERMINATED is visible the owner may reuse a callee-owned block, so the handle
+			// must not be read after the store below.
+			const bool pooled = dead->m_Origin == Provenance::NUMA_GLOBAL;
+			void* const base = dead->m_StackPtr;
+			const size_t size = dead->m_StackSize;
+			const uint8_t node = dead->m_NumaNode;
+
 			// Release store: owners polling for TERMINATED may reuse the memory once they see it.
 			::Corium::Atomics::store<Atomics::MemoryOrder::RELEASE>(&dead->m_State, FrameState::TERMINATED);
 
 			// Pool blocks are Corium's, so they go back as soon as the frame has left them. The handle is invalid after this.
-			if (dead->m_Origin == Provenance::NUMA_GLOBAL) releasePoolBlock(dead);
+			if (pooled) releasePoolBlock(base, size, node);
 		}
 
 		CORIUM_NORETURN void trampolineEntry(void* p_Ctx) {

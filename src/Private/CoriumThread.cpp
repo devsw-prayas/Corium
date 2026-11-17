@@ -619,17 +619,17 @@ namespace Corium::Core {
 #endif
 	}
 
-	void NativeThread::waitOnAddressFor(ParkingSupport& ro_Support, Chrono::Instant v_Deadline) noexcept {
+	void NativeThread::waitOnAddressFor(ParkingSupport& ro_Support, Chrono::Instant v_Deadline, uint32_t v_Expected) noexcept {
 #ifdef _WIN32
 		const int64_t milliseconds = v_Deadline.remainingMilliseconds();
 		const DWORD timeout = (milliseconds <= 0) ? 0u
 			: static_cast<DWORD>(milliseconds < 0xFFFFFFFELL ? milliseconds : 0xFFFFFFFEu);
-		uint32_t expected = 0u;
-		WaitOnAddress(ro_Support.data(), &expected, sizeof(uint32_t), timeout);
+		WaitOnAddress(ro_Support.data(), &v_Expected, sizeof(uint32_t), timeout);
 #else
 		// TODO: Linux futex with timeout
 		(void) ro_Support;
 		(void) v_Deadline;
+		(void) v_Expected;
 #endif
 	}
 }

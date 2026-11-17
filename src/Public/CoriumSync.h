@@ -232,12 +232,17 @@ namespace Corium::Runtime::Sync {
 
 	template<typename T>
 	class Exchanger final {
+		// FILLING and TAKING fence the buffers: a slot is only WAITING once the waiter's value is constructed,
+		// and only FULFILLED once the partner's value is.
 		static constexpr uint32_t SLOT_EMPTY = 0u;
-		static constexpr uint32_t SLOT_WAITING = 1u;
-		static constexpr uint32_t SLOT_FULFILLED = 2u;
+		static constexpr uint32_t SLOT_FILLING = 1u;
+		static constexpr uint32_t SLOT_WAITING = 2u;
+		static constexpr uint32_t SLOT_TAKING = 3u;
+		static constexpr uint32_t SLOT_FULFILLED = 4u;
 
 		struct alignas(64) Slot {
 			Core::Atomic::AtomicValue32<uint32_t> m_State{ SLOT_EMPTY };
+			// Bumped after FULFILLED is published; the waiter parks on the value it read before checking state.
 			Core::ParkHandle                       m_Gate{ 0u };
 			alignas(alignof(T)) uint8_t            m_WaiterBuf[sizeof(T)];
 			alignas(alignof(T)) uint8_t            m_FulfillerBuf[sizeof(T)];
@@ -250,6 +255,111 @@ namespace Corium::Runtime::Sync {
 			const uintptr_t address = reinterpret_cast<uintptr_t>(
 				Core::this_thread::currentPermit().m_ParkingPermit.data());
 			return static_cast<uint32_t>((address >> 6) % m_SlotCount);
+		}
+
+		CORIUM_FORCEINLINE static bool transition(Slot& r_Slot, uint32_t v_From, uint32_t v_To) noexcept {
+			uint32_t expected = v_From;
+			return r_Slot.m_State.compareExchange(&expected, v_To,
+				Core::Atomics::MemoryOrder::ACQ_REL, Core::Atomics::MemoryOrder::RELAXED) == v_From;
+		}
+
+		bool tryFulfill(uint32_t v_Start, T& r_Value, T& ro_Result) {
+			for (uint32_t i = 0; i < m_SlotCount; ++i) {
+				Slot& slot = m_pSlots[(v_Start + i) % m_SlotCount];
+				if (!transition(slot, SLOT_WAITING, SLOT_TAKING)) continue;
+				T* waiter = reinterpret_cast<T*>(slot.m_WaiterBuf);
+				ro_Result = std::move(*waiter);
+				waiter->~T();
+				new (slot.m_FulfillerBuf) T(std::move(r_Value));
+				slot.m_State.store(SLOT_FULFILLED, Core::Atomics::MemoryOrder::RELEASE);
+				slot.m_Gate.m_ParkingPermit.increment(Core::Atomics::MemoryOrder::ACQ_REL);
+				Core::ParkingSupport support(&slot.m_Gate);
+				Core::NativeThread::wakeOnAddress(support);
+				return true;
+			}
+			return false;
+		}
+
+		void collect(Slot& r_Slot, T& ro_Result) {
+			T* fulfiller = reinterpret_cast<T*>(r_Slot.m_FulfillerBuf);
+			ro_Result = std::move(*fulfiller);
+			fulfiller->~T();
+			r_Slot.m_State.store(SLOT_EMPTY, Core::Atomics::MemoryOrder::RELEASE);
+		}
+
+		enum class Outcome : uint8_t { EXCHANGED, TIMED_OUT, RETRY };
+
+		// Wakes waiters on lower slots so they re-scan; true when a waiter sits on a higher slot.
+		// Lower waiters yield to higher ones: symmetric "both withdraw" livelocks, and a waiter that parked before
+		// the other arrived would never look again, hence the kick.
+		bool scanOtherWaiters(const Slot& ro_Own) noexcept {
+			const uint32_t own = static_cast<uint32_t>(&ro_Own - m_pSlots);
+			bool higher = false;
+			for (uint32_t i = 0; i < m_SlotCount; ++i) {
+				if (i == own) continue;
+				Slot& other = m_pSlots[i];
+				if (other.m_State.load(Core::Atomics::MemoryOrder::SEQ_CST) != SLOT_WAITING) continue;
+				if (i > own) { higher = true; continue; }
+				other.m_Gate.m_ParkingPermit.increment(Core::Atomics::MemoryOrder::ACQ_REL);
+				Core::ParkingSupport support(&other.m_Gate);
+				Core::NativeThread::wakeOnAddress(support);
+			}
+			return higher;
+		}
+
+		// Withdraw through FILLING so no partner or new waiter touches the buffer while it is emptied.
+		bool withdraw(Slot& r_Slot, T& r_Value) {
+			if (!transition(r_Slot, SLOT_WAITING, SLOT_FILLING)) return false;
+			T* waiter = reinterpret_cast<T*>(r_Slot.m_WaiterBuf);
+			r_Value = std::move(*waiter);
+			waiter->~T();
+			r_Slot.m_State.store(SLOT_EMPTY, Core::Atomics::MemoryOrder::RELEASE);
+			return true;
+		}
+
+		// TIMED_OUT and RETRY both mean the offer was withdrawn and r_Value holds the value again.
+		Outcome awaitPartner(Slot& r_Slot, T& r_Value, T& ro_Result, const Chrono::Instant* p_Deadline) {
+			Core::ParkingSupport support(&r_Slot.m_Gate);
+			for (;;) {
+				const uint32_t gate = r_Slot.m_Gate.m_ParkingPermit.load(Core::Atomics::MemoryOrder::ACQUIRE);
+				const uint32_t state = r_Slot.m_State.load(Core::Atomics::MemoryOrder::ACQUIRE);
+				if (state == SLOT_FULFILLED) break;
+				// TAKING means a partner is mid-handoff: wait it out even past the deadline, it finishes shortly.
+				if (state != SLOT_WAITING) { Intrinsic::Pause(); continue; }
+				if (p_Deadline && p_Deadline->isExpired()) {
+					if (withdraw(r_Slot, r_Value)) return Outcome::TIMED_OUT;
+					continue;
+				}
+				// Waiters only sit in their own slot and nobody but a fulfiller scans, so two waiters in different
+				// slots would park forever. The lower one withdraws and goes back to fulfilling.
+				if (scanOtherWaiters(r_Slot)) {
+					if (withdraw(r_Slot, r_Value)) return Outcome::RETRY;
+					continue;
+				}
+				if (p_Deadline) Core::NativeThread::waitOnAddressFor(support, *p_Deadline, gate);
+				else Core::NativeThread::waitOnAddress(support, gate);
+			}
+			collect(r_Slot, ro_Result);
+			return Outcome::EXCHANGED;
+		}
+
+		bool exchangeImpl(T& r_Value, T& ro_Result, const Chrono::Instant* p_Deadline) {
+			const uint32_t start = pickSlot();
+			for (;;) {
+				// Retried every round: a partner may have published WAITING after our last scan.
+				if (tryFulfill(start, r_Value, ro_Result)) return true;
+				if (p_Deadline && p_Deadline->isExpired()) return false;
+				Slot& slot = m_pSlots[start];
+				if (transition(slot, SLOT_EMPTY, SLOT_FILLING)) {
+					new (slot.m_WaiterBuf) T(std::move(r_Value));
+					// SEQ_CST, paired with the SEQ_CST loads in scanOtherWaiters: two waiters each publish then read the
+					// other slot, and under release/acquire x86 may let both reads pass both stores, so both park.
+					slot.m_State.store(SLOT_WAITING, Core::Atomics::MemoryOrder::SEQ_CST);
+					const Outcome outcome = awaitPartner(slot, r_Value, ro_Result, p_Deadline);
+					if (outcome != Outcome::RETRY) return outcome == Outcome::EXCHANGED;
+				}
+				Intrinsic::Pause();
+			}
 		}
 
 	public:
@@ -276,91 +386,14 @@ namespace Corium::Runtime::Sync {
 		Exchanger& operator=(Exchanger&&) = delete;
 
 		T exchange(T&& v_Value) {
-			const uint32_t start = pickSlot();
-			// Try fulfiller: scan for a WAITING slot
-			for (uint32_t i = 0; i < m_SlotCount; ++i) {
-				Slot& slot = m_pSlots[(start + i) % m_SlotCount];
-				uint32_t expected = SLOT_WAITING;
-				if (slot.m_State.compareExchange(&expected, SLOT_FULFILLED,
-					Core::Atomics::MemoryOrder::ACQ_REL,
-					Core::Atomics::MemoryOrder::RELAXED) == SLOT_WAITING) {
-					T result = std::move(*reinterpret_cast<T*>(slot.m_WaiterBuf));
-					reinterpret_cast<T*>(slot.m_WaiterBuf)->~T();
-					new (slot.m_FulfillerBuf) T(std::move(v_Value));
-					Core::ParkingSupport support(&slot.m_Gate);
-					NativeThread::wakeOnAddress(support);
-					return result;
-				}
-			}
-			// Become waiter on preferred slot
-			for (;;) {
-				Slot& slot = m_pSlots[start];
-				uint32_t expected = SLOT_EMPTY;
-				if (slot.m_State.compareExchange(&expected, SLOT_WAITING,
-					Core::Atomics::MemoryOrder::ACQ_REL,
-					Core::Atomics::MemoryOrder::RELAXED) == SLOT_EMPTY) {
-					new (slot.m_WaiterBuf) T(std::move(v_Value));
-					while (slot.m_State.load(Core::Atomics::MemoryOrder::ACQUIRE) != SLOT_FULFILLED) {
-						Core::ParkingSupport support(&slot.m_Gate);
-						Core::NativeThread::waitOnAddress(support);
-					}
-					T result = std::move(*reinterpret_cast<T*>(slot.m_FulfillerBuf));
-					reinterpret_cast<T*>(slot.m_FulfillerBuf)->~T();
-					slot.m_State.store(SLOT_EMPTY, Core::Atomics::MemoryOrder::RELEASE);
-					return result;
-				}
-				Intrinsic::Pause();
-			}
+			T result{};
+			CORIUM_UNUSED(exchangeImpl(v_Value, result, nullptr));
+			return result;
 		}
 
+		// On timeout v_Value is handed back intact, since no partner took it.
 		bool exchange(T&& v_Value, T& ro_Result, Chrono::Instant v_Deadline) {
-			const uint32_t start = pickSlot();
-			// Try fulfiller: scan for a WAITING slot
-			for (uint32_t i = 0; i < m_SlotCount; ++i) {
-				Slot& slot = m_pSlots[(start + i) % m_SlotCount];
-				uint32_t expected = SLOT_WAITING;
-				if (slot.m_State.compareExchange(&expected, SLOT_FULFILLED,
-					Core::Atomics::MemoryOrder::ACQ_REL,
-					Core::Atomics::MemoryOrder::RELAXED) == SLOT_WAITING) {
-					ro_Result = std::move(*reinterpret_cast<T*>(slot.m_WaiterBuf));
-					reinterpret_cast<T*>(slot.m_WaiterBuf)->~T();
-					new (slot.m_FulfillerBuf) T(std::move(v_Value));
-					Core::ParkingSupport support(&slot.m_Gate);
-					Core::NativeThread::wakeOnAddress(support);
-					return true;
-				}
-			}
-			// Become waiter on preferred slot
-			for (;;) {
-				if (v_Deadline.isExpired()) return false;
-				Slot& slot = m_pSlots[start];
-				uint32_t expected = SLOT_EMPTY;
-				if (slot.m_State.compareExchange(&expected, SLOT_WAITING,
-					Core::Atomics::MemoryOrder::ACQ_REL,
-					Core::Atomics::MemoryOrder::RELAXED) == SLOT_EMPTY) {
-					new (slot.m_WaiterBuf) T(std::move(v_Value));
-					while (slot.m_State.load(Core::Atomics::MemoryOrder::ACQUIRE) != SLOT_FULFILLED) {
-						if (v_Deadline.isExpired()) {
-							// Try to cancel — only succeeds if fulfiller hasn't raced us
-							uint32_t waiting = SLOT_WAITING;
-							if (slot.m_State.compareExchange(&waiting, SLOT_EMPTY,
-								Core::Atomics::MemoryOrder::ACQ_REL,
-								Core::Atomics::MemoryOrder::RELAXED) == SLOT_WAITING) {
-								reinterpret_cast<T*>(slot.m_WaiterBuf)->~T();
-								return false;
-							}
-							break; // fulfiller raced us — fall through to collect result
-						}
-						Core::ParkingSupport support(&slot.m_Gate);
-						Core::NativeThread::waitOnAddressFor(support, v_Deadline);
-					}
-					ro_Result = std::move(*reinterpret_cast<T*>(slot.m_FulfillerBuf));
-					reinterpret_cast<T*>(slot.m_FulfillerBuf)->~T();
-					slot.m_State.store(SLOT_EMPTY, Core::Atomics::MemoryOrder::RELEASE);
-					return true;
-				}
-				Intrinsic::Pause();
-			}
+			return exchangeImpl(v_Value, ro_Result, &v_Deadline);
 		}
 	};
 }

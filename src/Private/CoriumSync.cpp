@@ -61,7 +61,7 @@ namespace Corium::Runtime::Sync {
 			if (expected == 0) return true;
 			if (v_Deadline.isExpired()) return false;
 			Core::ParkingSupport support(&m_Counter);
-			Core::NativeThread::waitOnAddressFor(support, v_Deadline);
+			Core::NativeThread::waitOnAddressFor(support, v_Deadline, expected);
 		}
 	}
 
@@ -107,10 +107,13 @@ namespace Corium::Runtime::Sync {
 		while (m_Generation.m_ParkingPermit.load(Core::Atomics::MemoryOrder::ACQUIRE) == gen && !isBroken()) {
 			if (v_Deadline.isExpired()) {
 				m_IsBroken.store(true, Core::Atomics::MemoryOrder::RELEASE);
+				// Bump the generation too: untimed parties park on it, and a break that leaves it unchanged
+				// lands between their isBroken() check and their park and never wakes them.
+				m_Generation.m_ParkingPermit.increment(Core::Atomics::MemoryOrder::ACQ_REL);
 				Core::NativeThread::wakeAllOnAddress(support);
 				return false;
 			}
-			Core::NativeThread::waitOnAddressFor(support, v_Deadline);
+			Core::NativeThread::waitOnAddressFor(support, v_Deadline, gen);
 		}
 		return !isBroken();
 	}
@@ -198,21 +201,22 @@ namespace Corium::Runtime::Sync {
 				if (old == v) return true;
 			}
 			if (v_Deadline.isExpired()) return false;
+			if (v != 0) continue; // lost a CAS race with permits still there: retry, don't park
 			Core::ParkingSupport support(&m_Permits);
-			Core::NativeThread::waitOnAddressFor(support, v_Deadline);
+			Core::NativeThread::waitOnAddressFor(support, v_Deadline, 0u);
 		}
 	}
 
 	void Semaphore::release() {
-		uint32_t prev = m_Permits.m_ParkingPermit.fetchAdd(1, Core::Atomics::MemoryOrder::ACQ_REL);
-		if (prev == 0) {
-			Core::ParkingSupport support(&m_Permits);
-			Core::NativeThread::wakeOnAddress(support);
-		}
+		CORIUM_UNUSED(m_Permits.m_ParkingPermit.fetchAdd(1, Core::Atomics::MemoryOrder::ACQ_REL));
+		// Wake on every release, not only on 0 -> 1: back-to-back releases would otherwise leave waiters parked
+		// beside available permits, since only the first release saw prev == 0.
+		Core::ParkingSupport support(&m_Permits);
+		Core::NativeThread::wakeOnAddress(support);
 	}
 
 	void Semaphore::release(uint32_t v_Permits) {
-		uint32_t prev = m_Permits.m_ParkingPermit.fetchAdd(v_Permits, Core::Atomics::MemoryOrder::ACQ_REL);
+		CORIUM_UNUSED(m_Permits.m_ParkingPermit.fetchAdd(v_Permits, Core::Atomics::MemoryOrder::ACQ_REL));
 		Core::ParkingSupport support(&m_Permits);
 		Core::NativeThread::wakeAllOnAddress(support);
 	}
@@ -881,7 +885,9 @@ namespace Corium::Runtime::Sync {
 			const uint32_t currentPhase  = m_Phase.load(Core::Atomics::MemoryOrder::ACQUIRE);
 			if (currentPhase != v_Phase || m_Terminated.load(Core::Atomics::MemoryOrder::ACQUIRE)) return currentPhase;
 			const uint32_t gate = m_Gate.load(Core::Atomics::MemoryOrder::ACQUIRE);
-			if (m_Phase.load(Core::Atomics::MemoryOrder::ACQUIRE) != v_Phase) return m_Phase.load(Core::Atomics::MemoryOrder::ACQUIRE);
+			// Terminated is re-checked too: forceTermination bumps the gate without moving the phase.
+			if (m_Phase.load(Core::Atomics::MemoryOrder::ACQUIRE) != v_Phase || m_Terminated.load(Core::Atomics::MemoryOrder::ACQUIRE))
+				return m_Phase.load(Core::Atomics::MemoryOrder::ACQUIRE);
 #ifdef _WIN32
 			WaitOnAddress(m_Gate.data(), const_cast<uint32_t*>(&gate), sizeof(uint32_t), INFINITE);
 #else
@@ -901,7 +907,8 @@ namespace Corium::Runtime::Sync {
 			if (currentPhase != v_Phase || m_Terminated.load(Core::Atomics::MemoryOrder::ACQUIRE)) return true;
 			if (v_Deadline.isExpired()) return false;
 			const uint32_t gate = m_Gate.load(Core::Atomics::MemoryOrder::ACQUIRE);
-			if (m_Phase.load(Core::Atomics::MemoryOrder::ACQUIRE) != v_Phase) return true;
+			if (m_Phase.load(Core::Atomics::MemoryOrder::ACQUIRE) != v_Phase || m_Terminated.load(Core::Atomics::MemoryOrder::ACQUIRE))
+				return true;
 #ifdef _WIN32
 			const int64_t milliseconds      = v_Deadline.remainingMilliseconds();
 			const DWORD   timeout = (milliseconds <= 0) ? 0u

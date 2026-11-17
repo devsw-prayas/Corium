@@ -31,6 +31,7 @@ namespace Corium::Core {
 		static void wakeOnAddress(ParkingSupport& ro_Support) noexcept;
 		static void wakeAllOnAddress(ParkingSupport& ro_Support) noexcept;
 
-		static void waitOnAddressFor(ParkingSupport& ro_Support, Chrono::Instant v_Deadline) noexcept;
+		// Parks while the word equals v_Expected; pass the value the caller last saw, not a constant.
+		static void waitOnAddressFor(ParkingSupport& ro_Support, Chrono::Instant v_Deadline, uint32_t v_Expected = 0u) noexcept;
 	};
 }
