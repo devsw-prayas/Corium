@@ -47,6 +47,7 @@ namespace Corium::Core::Frame {
 		CORIUM_NODISCARD static bool trySwitchTo(FrameHandle* p_Self, FrameHandle* p_Target, bool v_Terminate);
 		static void yieldToNative(FrameHandle* p_Self, bool v_Terminate);
 		// Wipes a suspended frame's whole block and leaves a blank TERMINATED handle. Never resumes it, never frees it.
-		static void killFrame(const FrameHandle* p_Target);
+		// False when the frame is RUNNING, TERMINATED or already being killed: claimed by CAS, so it races safely with a capture.
+		CORIUM_NODISCARD static bool killFrame(FrameHandle* p_Target);
 	};
 }

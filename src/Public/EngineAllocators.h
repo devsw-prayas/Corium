@@ -237,7 +237,10 @@ namespace Corium::Memory::Allocators {
 			LockGuard guard(m_Lock);
 			if (!m_UnderlyingArena.m_Base) return nullptr;
 
-			const size_t slack = alignment > alignof(BlockHeader) ? alignment - alignof(BlockHeader) : 0;
+			// raw is 16-aligned, so raw + header + BACK_PTR_SLOT sits at 8 mod 16 and aligning it up costs up to A - 8 bytes
+			// (exactly 8 at A = 16). Undercounting this let the user's tail overwrite this block's footer.
+			const size_t effectiveAlign = alignment > alignof(BlockHeader) ? alignment : alignof(BlockHeader);
+			const size_t slack = effectiveAlign - sizeof(BlockHeader*);
 			// BACK_PTR_SLOT: header always sits at the arena's own start for this block (raw,
 			// or a free-list block's own address) - never shifted for alignment, or the
 			// shifted-over bytes become an untracked gap next()/prev() can walk into as a fake
@@ -289,8 +292,7 @@ namespace Corium::Memory::Allocators {
 			LockGuard guard(m_Lock);
 			if (!ptr) return;
 
-			auto* b = *reinterpret_cast<BlockHeader**>(static_cast<uint8_t*>(ptr) - sizeof(BlockHeader*));
-			b->set(b->size(), true);
+			auto* b = *reinterpret_cast<BlockHeader**>(static_cast<uint8_t*>(ptr) - sizeof(BlockHeader*));			b->set(b->size(), true);
 			b = coalesce(b);
 
 			uint8_t* end = reinterpret_cast<uint8_t*>(b) + b->size();

@@ -19,7 +19,9 @@ namespace Corium::Core::Frame {
 		"size must be less than 8MiB");
 
 	enum class CORIUM_RUNTIME_API FrameState : uint8_t {
-		READY, RUNNING, SUSPENDED, TERMINATED
+		READY, RUNNING, SUSPENDED, TERMINATED,
+		// Held by killFrame for the wipe; unclaimable, so no thread can switch into a block being zeroed.
+		KILLING
 	};
 
 	enum class CORIUM_RUNTIME_API Provenance : uint8_t {

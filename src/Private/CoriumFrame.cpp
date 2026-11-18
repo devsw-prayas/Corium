@@ -265,11 +265,17 @@ namespace Corium::Core::Frame {
 		switchTo(p_Self, std::addressof(this_frame::nativeContext()), v_Terminate);
 	}
 
-	void NativeFrame::killFrame(const FrameHandle* p_Target) {
+	bool NativeFrame::killFrame(FrameHandle* p_Target) {
+		using ::Corium::Atomics::MemoryOrder;
 		CORIUM_ASSERT(p_Target != nullptr);
 		CORIUM_ASSERT(p_Target != this_frame::currentFrame() && "Cannot kill the frame that is running");
 		CORIUM_ASSERT(!p_Target->m_IsNative && "Cannot kill a thread's native context");
-		CORIUM_ASSERT(p_Target->m_State != FrameState::RUNNING && "Cannot kill a running frame");
+
+		// Same gate as claim(): whoever wins the CAS owns the block. A loser (capture or second kill) backs off untouched.
+		// Acquire also pairs with afterSwitch's release, so a SUSPENDED frame's blob and entry slot are fully written.
+		FrameState expected = ::Corium::Atomics::load<MemoryOrder::ACQUIRE>(&p_Target->m_State);
+		if (expected != FrameState::READY && expected != FrameState::SUSPENDED) return false;
+		if (!::Corium::Atomics::compareExchange<MemoryOrder::ACQ_REL>(&p_Target->m_State, expected, FrameState::KILLING)) return false;
 
 		// Runs the closure's destructor while its slot is intact; the wipe below would skip it.
 		destroyEntry(p_Target);
@@ -281,7 +287,11 @@ namespace Corium::Core::Frame {
 		if (p_Target->m_Origin == Provenance::NUMA_GLOBAL) {
 			const bool lifted = ::Corium::Memory::VirtualMemory::unprotectMem(::Corium::Memory::createSegment({ base + ::Corium::Memory::PAGE_SIZE, ::Corium::Memory::PAGE_SIZE }));
 			CORIUM_ASSERT(lifted && "Could not lift the guard page");
-			if (!lifted) return;
+			if (!lifted) {
+				// Entry is already destroyed, so it must never run again: park it as finished rather than claimable.
+				::Corium::Atomics::store<MemoryOrder::RELEASE>(&p_Target->m_State, FrameState::TERMINATED);
+				return false;
+			}
 		}
 
 		// Nothing of the old occupant survives, then a blank handle stands at the same address (assignment is deleted).
@@ -290,5 +300,6 @@ namespace Corium::Core::Frame {
 
 		// A blank READY handle with no entry would crash whoever dispatched it, so it reads as finished instead.
 		::Corium::Atomics::store<Atomics::MemoryOrder::RELEASE>(&blank->m_State, FrameState::TERMINATED);
+		return true;
 	}
 }

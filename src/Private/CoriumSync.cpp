@@ -667,6 +667,8 @@ namespace Corium::Runtime::Sync {
 	}
 
 	bool StampedLock::validate(uint64_t v_Stamp) const noexcept {
+		// Optimistic data reads must not sink below the stamp re-read; TSO keeps load order, so this only pins the compiler.
+		Corium::Atomics::fence<Core::Atomics::MemoryOrder::ACQUIRE>();
 		uint64_t state = m_State.load(Core::Atomics::MemoryOrder::ACQUIRE);
 		return !(state & SL_WBIT) && (state & SL_SBITS) == v_Stamp;
 	}
